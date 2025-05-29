@@ -1,0 +1,154 @@
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+
+class ConfigService extends ChangeNotifier {
+  // 默认配置
+  static const Map<String, dynamic> _defaultConfig = {
+    // 播放速度选项
+    'playbackRates': [0.5, 0.75, 1.0, 1.25, 1.5, 2.0],
+    'defaultPlaybackRate': 1.0,
+    
+    // 循环设置
+    'loopWaitInterval': 2000, // 毫秒
+    
+    // 字幕设置
+    'subtitleFontSize': 16.0,
+    'subtitleColor': 0xFFFFFFFF, // 白色
+    'subtitleBackgroundColor': 0x80000000, // 半透明黑色
+    'subtitleFontWeight': 'normal', // normal, bold
+    
+    // 界面设置
+    'darkMode': false,
+  };
+  
+  // 当前配置
+  Map<String, dynamic> _config = Map.from(_defaultConfig);
+  
+  // 获取配置
+  Map<String, dynamic> get config => _config;
+  
+  // 获取播放速度选项
+  List<double> get playbackRates => List<double>.from(_config['playbackRates']);
+  
+  // 获取默认播放速度
+  double get defaultPlaybackRate => _config['defaultPlaybackRate'];
+  
+  // 获取循环等待间隔
+  int get loopWaitInterval => _config['loopWaitInterval'];
+  
+  // 获取字幕字体大小
+  double get subtitleFontSize => _config['subtitleFontSize'];
+  
+  // 获取字幕颜色
+  Color get subtitleColor => Color(_config['subtitleColor']);
+  
+  // 获取字幕背景颜色
+  Color get subtitleBackgroundColor => Color(_config['subtitleBackgroundColor']);
+  
+  // 获取字幕字体粗细
+  FontWeight get subtitleFontWeight => 
+      _config['subtitleFontWeight'] == 'bold' ? FontWeight.bold : FontWeight.normal;
+  
+  // 获取暗黑模式
+  bool get darkMode => _config['darkMode'];
+  
+  // 构造函数
+  ConfigService() {
+    loadConfig();
+  }
+  
+  // 加载配置
+  Future<void> loadConfig() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final configString = prefs.getString('app_config');
+      
+      if (configString != null) {
+        final loadedConfig = json.decode(configString);
+        _config = Map.from(_defaultConfig); // 先加载默认配置
+        _config.addAll(loadedConfig); // 再覆盖已保存的配置
+      }
+      
+      notifyListeners();
+    } catch (e) {
+      debugPrint('加载配置失败: $e');
+      // 使用默认配置
+      _config = Map.from(_defaultConfig);
+    }
+  }
+  
+  // 保存配置
+  Future<void> saveConfig() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final configString = json.encode(_config);
+      await prefs.setString('app_config', configString);
+    } catch (e) {
+      debugPrint('保存配置失败: $e');
+    }
+  }
+  
+  // 更新播放速度选项
+  Future<void> updatePlaybackRates(List<double> rates) async {
+    _config['playbackRates'] = rates;
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新默认播放速度
+  Future<void> updateDefaultPlaybackRate(double rate) async {
+    _config['defaultPlaybackRate'] = rate;
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新循环等待间隔
+  Future<void> updateLoopWaitInterval(int milliseconds) async {
+    _config['loopWaitInterval'] = milliseconds;
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新字幕字体大小
+  Future<void> updateSubtitleFontSize(double size) async {
+    _config['subtitleFontSize'] = size;
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新字幕颜色
+  Future<void> updateSubtitleColor(Color color) async {
+    _config['subtitleColor'] = color.value;
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新字幕背景颜色
+  Future<void> updateSubtitleBackgroundColor(Color color) async {
+    _config['subtitleBackgroundColor'] = color.value;
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新字幕字体粗细
+  Future<void> updateSubtitleFontWeight(bool isBold) async {
+    _config['subtitleFontWeight'] = isBold ? 'bold' : 'normal';
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新暗黑模式
+  Future<void> updateDarkMode(bool isDark) async {
+    _config['darkMode'] = isDark;
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 重置为默认配置
+  Future<void> resetToDefault() async {
+    _config = Map.from(_defaultConfig);
+    await saveConfig();
+    notifyListeners();
+  }
+} 
