@@ -8,7 +8,7 @@
 
 ## 下载安装
 
-[![下载安装包](https://img.shields.io/github/v/release/YOUR_USERNAME/video_repeater_study_language?label=下载&style=for-the-badge)](https://github.com/ericfetch/video_repeater/releases)
+[![下载安装包](https://img.shields.io/github/v/release/ericfetch/video_repeater?label=下载&style=for-the-badge)](https://github.com/ericfetch/video_repeater/releases)
 
 > **提示**：点击上方按钮下载最新版本的安装包
 
