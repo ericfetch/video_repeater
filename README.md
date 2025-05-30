@@ -2,6 +2,16 @@
 
 一款专为语言学习者设计的视频重复播放工具，帮助您通过视频内容高效学习语言。
 
+<div align="center">
+  <img src="docs/images/app_home_page_screen.png" alt="应用截图" width="800"/>
+</div>
+
+## 下载安装
+
+[![下载安装包](https://img.shields.io/github/v/release/YOUR_USERNAME/video_repeater_study_language?label=下载&style=for-the-badge)](https://github.com/ericfetch/video_repeater/releases)
+
+> **提示**：点击上方按钮下载最新版本的安装包
+
 ## 功能特点
 
 - **视频播放**：支持多种视频格式，流畅播放
@@ -11,13 +21,14 @@
 - **历史记录**：自动保存观看历史，随时可以继续上次的学习进度
 - **快捷键**：丰富的键盘快捷键，提高学习效率
 - **自定义设置**：可调整播放速度、字幕样式等多项设置
+- **悬浮控制栏**：视频播放时控制栏会自动隐藏，鼠标移动到顶部时显示
 
 ## 安装方法
 
 ### Windows
 
-1. 下载最新的安装包 `VideoLanguageLearner-Setup.exe`
-2. 双击运行安装程序
+1. 下载最新的[安装包](https://github.com/ericfetch/video_repeater/releases)
+2. 双击运行安装程序 `VideoRepeater-Setup.exe`
 3. 按照向导提示完成安装
 4. 从桌面或开始菜单启动应用
 
@@ -63,6 +74,20 @@
 - Windows 10/11 64位系统
 - 至少4GB内存
 - 至少100MB可用磁盘空间
+- 安装 [K-Lite Codec Pack](https://codecguide.com/download_kl.htm) 以获得最佳播放体验
+
+## 更新日志
+
+### v1.1.0 (2023-11-20)
+- 添加悬浮透明AppBar，改进视频播放体验
+- 优化鼠标交互，只在顶部区域才显示控制栏
+- 修复上一句/下一句功能的稳定性问题
+- 添加自动隐藏控制栏功能
+
+### v1.0.0 (2023-11-10)
+- 首次发布
+- 基本视频播放和字幕功能
+- 生词本和历史记录功能
 
 ## 常见问题
 
