@@ -20,6 +20,7 @@ class VideoService extends ChangeNotifier {
   SubtitleEntry? _loopingSubtitle; // 记录当前正在循环的字幕
   String? _currentVideoPath; // 当前视频路径
   ConfigService? _configService; // 配置服务
+  Timer? _debounceTimer;
   
   Player? get player => _player;
   SubtitleData? get subtitleData => _subtitleData;
@@ -348,75 +349,113 @@ class VideoService extends ChangeNotifier {
   
   // 下一句
   void nextSubtitle() {
-    if (_subtitleData != null && _subtitleData!.entries.isNotEmpty) {
-      if (_currentSubtitle != null) {
-        // 有当前字幕，获取下一句
-        final nextIndex = _currentSubtitle!.index + 1;
-        final nextEntry = _subtitleData!.getEntryByIndex(nextIndex);
-        if (nextEntry != null) {
-          debugPrint('下一句: #${nextEntry.index + 1}');
-          seekToSubtitle(nextEntry);
-        } else {
-          debugPrint('已经是最后一句');
-        }
+    // 防止短时间内重复调用
+    if (_debounceTimer?.isActive ?? false) {
+      debugPrint('防抖: 忽略快速连续的nextSubtitle调用');
+      return;
+    }
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {});
+    
+    if (_subtitleData == null || _subtitleData!.entries.isEmpty) {
+      debugPrint('无法跳转到下一句，无字幕数据');
+      return;
+    }
+    
+    // 获取当前播放位置
+    final currentPosition = _player?.state.position ?? Duration.zero;
+    
+    if (_currentSubtitle != null) {
+      // 有当前字幕，获取下一句
+      final nextIndex = _currentSubtitle!.index + 1;
+      final nextEntry = _subtitleData!.getEntryByIndex(nextIndex);
+      if (nextEntry != null) {
+        debugPrint('下一句: #${nextEntry.index + 1}');
+        seekToSubtitle(nextEntry);
       } else {
-        // 没有当前字幕，获取当前时间点之后的第一句字幕
-        final currentPosition = _player?.state.position ?? Duration.zero;
-        SubtitleEntry? nextEntry;
-        
-        // 寻找当前时间之后的第一条字幕
+        debugPrint('已经是最后一句');
+      }
+    } else {
+      // 没有当前字幕，查找当前时间点之后的第一句字幕
+      SubtitleEntry? nextEntry;
+      
+      // 先尝试获取当前时间的字幕
+      nextEntry = _subtitleData!.getEntryAtTime(currentPosition);
+      
+      // 如果当前没有字幕，寻找下一条字幕
+      if (nextEntry == null) {
         for (var entry in _subtitleData!.entries) {
           if (entry.start > currentPosition) {
             nextEntry = entry;
             break;
           }
         }
-        
-        // 如果找不到，则使用第一条字幕
-        nextEntry ??= _subtitleData!.entries.first;
-        
-        debugPrint('跳转到下一句: #${nextEntry.index + 1}');
-        seekToSubtitle(nextEntry);
+      } else {
+        // 如果当前有字幕，获取下一条
+        final nextIndex = nextEntry.index + 1;
+        nextEntry = _subtitleData!.getEntryByIndex(nextIndex) ?? nextEntry;
       }
-    } else {
-      debugPrint('无法跳转到下一句，无字幕数据');
+      
+      // 如果找不到，则使用第一条字幕
+      nextEntry ??= _subtitleData!.entries.first;
+      
+      debugPrint('跳转到下一句: #${nextEntry.index + 1}');
+      seekToSubtitle(nextEntry);
     }
   }
   
   // 上一句
   void previousSubtitle() {
-    if (_subtitleData != null && _subtitleData!.entries.isNotEmpty) {
-      if (_currentSubtitle != null) {
-        // 有当前字幕，获取上一句
-        final prevIndex = _currentSubtitle!.index - 1;
-        final prevEntry = _subtitleData!.getEntryByIndex(prevIndex);
-        if (prevEntry != null) {
-          debugPrint('上一句: #${prevEntry.index + 1}');
-          seekToSubtitle(prevEntry);
-        } else {
-          debugPrint('已经是第一句');
-        }
+    // 防止短时间内重复调用
+    if (_debounceTimer?.isActive ?? false) {
+      debugPrint('防抖: 忽略快速连续的previousSubtitle调用');
+      return;
+    }
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {});
+    
+    if (_subtitleData == null || _subtitleData!.entries.isEmpty) {
+      debugPrint('无法跳转到上一句，无字幕数据');
+      return;
+    }
+    
+    // 获取当前播放位置
+    final currentPosition = _player?.state.position ?? Duration.zero;
+    
+    if (_currentSubtitle != null) {
+      // 有当前字幕，获取上一句
+      final prevIndex = _currentSubtitle!.index - 1;
+      final prevEntry = _subtitleData!.getEntryByIndex(prevIndex);
+      if (prevEntry != null) {
+        debugPrint('上一句: #${prevEntry.index + 1}');
+        seekToSubtitle(prevEntry);
       } else {
-        // 没有当前字幕，获取当前时间点之前的最后一句字幕
-        final currentPosition = _player?.state.position ?? Duration.zero;
-        SubtitleEntry? prevEntry;
-        
-        // 寻找当前时间之前的最后一条字幕
+        debugPrint('已经是第一句');
+      }
+    } else {
+      // 没有当前字幕，查找当前时间点之前的最后一句字幕
+      SubtitleEntry? prevEntry;
+      
+      // 先尝试获取当前时间的字幕
+      prevEntry = _subtitleData!.getEntryAtTime(currentPosition);
+      
+      // 如果当前没有字幕，寻找前一条字幕
+      if (prevEntry == null) {
         for (var i = _subtitleData!.entries.length - 1; i >= 0; i--) {
           if (_subtitleData!.entries[i].end < currentPosition) {
             prevEntry = _subtitleData!.entries[i];
             break;
           }
         }
-        
-        // 如果找不到，则使用最后一条字幕
-        prevEntry ??= _subtitleData!.entries.last;
-        
-        debugPrint('跳转到上一句: #${prevEntry.index + 1}');
-        seekToSubtitle(prevEntry);
+      } else {
+        // 如果当前有字幕，获取上一条
+        final prevIndex = prevEntry.index - 1;
+        prevEntry = _subtitleData!.getEntryByIndex(prevIndex) ?? prevEntry;
       }
-    } else {
-      debugPrint('无法跳转到上一句，无字幕数据');
+      
+      // 如果找不到，则使用最后一条字幕
+      prevEntry ??= _subtitleData!.entries.last;
+      
+      debugPrint('跳转到上一句: #${prevEntry.index + 1}');
+      seekToSubtitle(prevEntry);
     }
   }
   
@@ -502,6 +541,7 @@ class VideoService extends ChangeNotifier {
   @override
   void dispose() {
     _loopTimer?.cancel();
+    _debounceTimer?.cancel();
     _player?.dispose();
     super.dispose();
   }

@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import '../services/vocabulary_service.dart';
 import '../services/video_service.dart';
 import '../models/vocabulary_model.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 
 class VocabularyListWidget extends StatefulWidget {
   const VocabularyListWidget({super.key});
@@ -92,17 +94,42 @@ class _VocabularyListWidgetState extends State<VocabularyListWidget> {
                   
                   return ListTile(
                     dense: true,
-                    title: Text(word.word, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    title: SelectableText(
+                      word.word, 
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                      toolbarOptions: const ToolbarOptions(
+                        copy: true,
+                        selectAll: true,
+                        cut: false,
+                        paste: false,
+                      ),
+                    ),
                     subtitle: Text(
                       word.context,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete, size: 18),
-                      onPressed: () {
-                        vocabularyService.removeWord(videoName, word.word);
-                      },
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.copy, size: 18),
+                          tooltip: '复制单词',
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: word.word));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('已复制: ${word.word}'), duration: const Duration(seconds: 1))
+                            );
+                          },
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete, size: 18),
+                          tooltip: '删除',
+                          onPressed: () {
+                            vocabularyService.removeWord(videoName, word.word);
+                          },
+                        ),
+                      ],
                     ),
                   );
                 },

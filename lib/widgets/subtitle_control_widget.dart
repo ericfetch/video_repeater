@@ -43,11 +43,18 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
   
   void _initializeValues() {
     final videoService = Provider.of<VideoService>(context, listen: false);
+    final configService = Provider.of<ConfigService>(context, listen: false);
     final player = videoService.player;
     if (player != null) {
       setState(() {
         _currentVolume = player.state.volume;
         _currentRate = player.state.rate;
+        
+        // 如果播放速度是默认的1.0，则应用配置的默认播放速度
+        if (_currentRate == 1.0) {
+          _currentRate = configService.defaultPlaybackRate;
+          player.setRate(_currentRate);
+        }
       });
       
       // 监听音量变化
@@ -213,35 +220,81 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        for (var rate in [0.75, 1.0, 1.25])
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 2),
-                            child: InkWell(
-                              onTap: () {
-                                setState(() {
-                                  _currentRate = rate;
-                                });
-                                player.setRate(rate);
-                                final messageService = Provider.of<MessageService>(context, listen: false);
-                                messageService.showMessage('播放速度: ${rate}x');
-                              },
-                              borderRadius: BorderRadius.circular(4),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: _currentRate == rate ? Colors.blue : Colors.grey[800],
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  '${rate}x',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
+                        Consumer<ConfigService>(
+                          builder: (context, configService, child) {
+                            final allRates = configService.playbackRates;
+                            // 最多显示5个按钮
+                            final maxButtonsToShow = 5;
+                            final showMoreButton = allRates.length > maxButtonsToShow;
+                            final displayRates = showMoreButton 
+                                ? allRates.sublist(0, maxButtonsToShow - 1) 
+                                : allRates;
+                            
+                            return Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // 显示有限数量的按钮
+                                for (var rate in displayRates)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                                    child: InkWell(
+                                      onTap: () {
+                                        setState(() {
+                                          _currentRate = rate;
+                                        });
+                                        player.setRate(rate);
+                                        final messageService = Provider.of<MessageService>(context, listen: false);
+                                        messageService.showMessage('播放速度: ${rate}x');
+                                      },
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: _currentRate == rate ? Colors.blue : Colors.grey[800],
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text(
+                                          '${rate}x',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ),
-                            ),
-                          ),
+                                  
+                                // 如果需要，添加"更多"按钮
+                                if (showMoreButton)
+                                  PopupMenuButton<double>(
+                                    tooltip: '更多速度选项',
+                                    padding: EdgeInsets.zero,
+                                    icon: Icon(
+                                      Icons.more_horiz,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                    onSelected: (rate) {
+                                      setState(() {
+                                        _currentRate = rate;
+                                      });
+                                      player.setRate(rate);
+                                      final messageService = Provider.of<MessageService>(context, listen: false);
+                                      messageService.showMessage('播放速度: ${rate}x');
+                                    },
+                                    itemBuilder: (context) {
+                                      return allRates.sublist(maxButtonsToShow - 1).map((rate) {
+                                        return PopupMenuItem<double>(
+                                          value: rate,
+                                          child: Text('${rate}x'),
+                                        );
+                                      }).toList();
+                                    },
+                                  ),
+                              ],
+                            );
+                          }
+                        ),
                       ],
                     ),
                     

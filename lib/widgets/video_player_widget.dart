@@ -79,10 +79,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
           mainAxisSize: MainAxisSize.min,
           children: [
             CircularProgressIndicator(),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
             Text(
               '正在加载视频...',
-              style: TextStyle(color: Colors.white70),
+              style: const TextStyle(color: Colors.white70),
             ),
           ],
         ),
