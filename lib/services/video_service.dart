@@ -228,6 +228,21 @@ class VideoService extends ChangeNotifier {
       await _player!.open(media);
       debugPrint('视频打开成功');
       
+      // 等待视频元数据加载完成
+      int attempts = 0;
+      const maxAttempts = 10;
+      while (attempts < maxAttempts && _player!.state.duration == Duration.zero) {
+        debugPrint('等待视频元数据加载，尝试 ${attempts + 1}/$maxAttempts');
+        await Future.delayed(const Duration(milliseconds: 200));
+        attempts++;
+      }
+      
+      if (_player!.state.duration == Duration.zero) {
+        debugPrint('警告：视频元数据可能未完全加载，持续时间为零');
+      } else {
+        debugPrint('视频元数据加载完成，持续时间: ${_player!.state.duration.inSeconds}秒');
+      }
+      
       _isLoading = false;
       notifyListeners();
       return true;

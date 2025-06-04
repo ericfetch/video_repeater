@@ -52,21 +52,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     debugPrint('HomeScreen初始化');
-    _loadHistory();
-    _loadVocabulary();
     _focusNode = FocusNode();
     
     // 添加窗口焦点变化的监听
     WidgetsBinding.instance.addObserver(this);
     
-    // 确保初始获得焦点并恢复最后的播放状态
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _focusNode.requestFocus();
+    // 先加载历史记录和生词本
+    _loadHistory().then((_) {
+      // 确保历史记录加载完成后，再尝试恢复播放状态
+      debugPrint('历史记录加载完成，准备恢复播放状态');
       
-      debugPrint('准备恢复最后播放状态');
-      // 在应用启动时恢复最后的播放状态
-      _restoreLastPlayState();
+      // 使用更长的延迟，确保UI和服务都已经初始化
+      Future.delayed(const Duration(milliseconds: 1000), () {
+        if (mounted) {
+          _focusNode.requestFocus();
+          _restoreLastPlayState();
+        }
+      });
     });
+    
+    _loadVocabulary();
     
     // 监听历史服务变化
     final historyService = Provider.of<HistoryService>(context, listen: false);
@@ -669,13 +674,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             debugPrint('没有字幕文件路径');
           }
           
-          // 无论字幕是否加载成功，都跳转到上次播放位置
-          debugPrint('准备跳转到位置: ${lastState.lastPosition.inSeconds}秒');
-          Future.delayed(const Duration(milliseconds: 800), () {
-            debugPrint('跳转到上次播放位置: ${lastState.lastPosition.inSeconds}秒');
-            videoService.seek(lastState.lastPosition);
-            _showSnackBar('已恢复上次播放进度: ${path.basename(lastState.videoPath)}');
-          });
+          // 使用更智能的方式等待视频加载并跳转
+          await _seekToPositionWithRetry(videoService, lastState.lastPosition, lastState.videoPath);
           
           // 加载该视频的生词本
           final videoName = path.basename(lastState.videoPath);
@@ -691,6 +691,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (e) {
       debugPrint('恢复最后播放状态时发生错误: $e');
     }
+  }
+  
+  // 使用重试机制跳转到指定位置
+  Future<void> _seekToPositionWithRetry(VideoService videoService, Duration position, String videoPath) async {
+    debugPrint('准备跳转到位置: ${position.inSeconds}秒');
+    
+    // 等待视频加载完成
+    int attempts = 0;
+    const maxAttempts = 5;
+    const initialDelay = 500; // 初始延迟毫秒
+    
+    while (attempts < maxAttempts) {
+      // 计算当前尝试的延迟时间（逐渐增加）
+      final delay = initialDelay + (attempts * 300);
+      
+      debugPrint('等待视频加载，尝试 ${attempts + 1}/$maxAttempts，延迟 ${delay}ms');
+      await Future.delayed(Duration(milliseconds: delay));
+      
+      // 检查视频是否已加载
+      if (videoService.player != null && videoService.duration.inMilliseconds > 0) {
+        debugPrint('视频已加载，持续时间: ${videoService.duration.inSeconds}秒');
+        
+        // 确保位置在有效范围内
+        final safePosition = Duration(
+          milliseconds: position.inMilliseconds.clamp(0, videoService.duration.inMilliseconds)
+        );
+        
+        // 执行跳转
+        videoService.seek(safePosition);
+        _showSnackBar('已恢复上次播放进度: ${path.basename(videoPath)}');
+        return;
+      }
+      
+      attempts++;
+    }
+    
+    debugPrint('视频加载超时，无法跳转到指定位置');
+    _showSnackBar('无法恢复播放进度，请手动操作');
   }
   
   // 保存当前播放状态
