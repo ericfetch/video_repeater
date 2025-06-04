@@ -5,11 +5,14 @@ import '../models/history_model.dart';
 
 class HistoryService extends ChangeNotifier {
   static const String _historyKey = 'video_history';
+  static const String _lastPlayStateKey = 'last_play_state';
   List<VideoHistory> _history = [];
   VideoHistory? _currentHistory;
+  VideoHistory? _lastPlayState;
   
   List<VideoHistory> get history => _history;
   VideoHistory? get currentHistory => _currentHistory;
+  VideoHistory? get lastPlayState => _lastPlayState;
   
   // 加载历史记录
   Future<void> loadHistory() async {
@@ -81,5 +84,36 @@ class HistoryService extends ChangeNotifier {
   void setCurrentHistory(VideoHistory history) {
     _currentHistory = history;
     notifyListeners();
+  }
+  
+  // 保存最后播放状态
+  Future<void> saveLastPlayState(VideoHistory lastState) async {
+    final prefs = await SharedPreferences.getInstance();
+    final stateJson = json.encode(lastState.toJson());
+    
+    await prefs.setString(_lastPlayStateKey, stateJson);
+    _lastPlayState = lastState;
+    notifyListeners();
+    debugPrint('已保存最后播放状态: ${lastState.videoName}');
+  }
+  
+  // 加载最后播放状态
+  Future<void> loadLastPlayState() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stateJson = prefs.getString(_lastPlayStateKey);
+    
+    if (stateJson != null) {
+      try {
+        _lastPlayState = VideoHistory.fromJson(json.decode(stateJson));
+        debugPrint('已加载最后播放状态: ${_lastPlayState?.videoName}');
+      } catch (e) {
+        debugPrint('加载最后播放状态时出错: $e');
+        _lastPlayState = null;
+      }
+      notifyListeners();
+    } else {
+      debugPrint('没有找到最后播放状态');
+      _lastPlayState = null;
+    }
   }
 } 

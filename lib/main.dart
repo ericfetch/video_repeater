@@ -3,12 +3,16 @@ import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:media_kit/media_kit.dart';
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as path;
 import 'services/video_service.dart';
 import 'services/history_service.dart';
 import 'services/vocabulary_service.dart';
 import 'services/message_service.dart';
 import 'services/config_service.dart';
+import 'services/app_services.dart';
+import 'models/history_model.dart';
 import 'screens/home_screen.dart';
 import 'screens/windows_requirements_screen.dart';
 
@@ -28,11 +32,20 @@ class NoSelectionTextEditingController extends TextEditingController {
   }
 }
 
+// 全局变量，用于在应用的任何地方访问
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
   // 初始化MediaKit
-  MediaKit.ensureInitialized();
+  try {
+    debugPrint('开始初始化MediaKit');
+    MediaKit.ensureInitialized();
+    debugPrint('MediaKit初始化成功');
+  } catch (e) {
+    debugPrint('MediaKit初始化失败: $e');
+  }
   
   // 禁用长按文本选择弹出菜单
   if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
@@ -61,6 +74,10 @@ void main() async {
     titleBarStyle: TitleBarStyle.normal,
   );
   
+  // 添加窗口关闭事件监听
+  windowManager.setPreventClose(true);
+  windowManager.addListener(WindowManagerListener());
+  
   await windowManager.waitUntilReadyToShow(windowOptions, () async {
     await windowManager.show();
     await windowManager.focus();
@@ -88,7 +105,11 @@ class MyApp extends StatelessWidget {
           final videoService = Provider.of<VideoService>(context, listen: false);
           videoService.setConfigService(configService);
           
+          // 初始化全局服务引用
+          AppServices.initServices(context);
+          
           return MaterialApp(
+            navigatorKey: navigatorKey, // 添加全局导航键
             title: '视频学习助手',
             theme: ThemeData(
               primarySwatch: Colors.blue,
@@ -120,7 +141,7 @@ class MyApp extends StatelessWidget {
                   return const WindowsRequirementsScreen();
                 }
                 
-                return MessageOverlay(child: HomeScreen());
+                return const MessageOverlay(child: HomeScreen());
               },
             ),
             debugShowCheckedModeBanner: false,
@@ -268,5 +289,85 @@ class MessageOverlay extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+// 窗口管理器监听器
+class WindowManagerListener extends WindowListener {
+  @override
+  void onWindowClose() async {
+    debugPrint("窗口关闭事件触发，暂停视频并保存当前播放状态");
+    
+    try {
+      // 先暂停视频播放
+      final videoService = AppServices.videoService;
+      if (videoService != null && videoService.player != null && videoService.player!.state.playing) {
+        await videoService.player!.pause();
+        debugPrint("已暂停视频播放");
+      }
+      
+      // 创建一个计时器，如果保存操作超过1.5秒，就直接关闭窗口
+      final closeTimer = Timer(const Duration(milliseconds: 1500), () async {
+        debugPrint("保存操作超时，直接关闭窗口");
+        await windowManager.destroy();
+      });
+      
+      // 尝试保存状态，但设置超时机制
+      saveLastPlayStateGlobal().timeout(
+        const Duration(milliseconds: 1000),
+        onTimeout: () {
+          debugPrint("保存状态操作超时");
+          return;
+        }
+      ).whenComplete(() {
+        if (closeTimer.isActive) {
+          closeTimer.cancel();
+          windowManager.destroy();
+        }
+      });
+    } catch (e) {
+      debugPrint("窗口关闭处理错误: $e");
+      // 出错也允许窗口关闭
+      await windowManager.destroy();
+    }
+  }
+}
+
+// 全局保存方法
+Future<void> saveLastPlayStateGlobal() async {
+  try {
+    debugPrint("尝试使用全局方法保存状态");
+    
+    // 从全局服务获取数据
+    final videoService = AppServices.videoService;
+    final historyService = AppServices.historyService;
+    
+    if (videoService != null && 
+        historyService != null && 
+        videoService.player != null && 
+        videoService.currentVideoPath != null) {
+      
+      final videoPath = videoService.currentVideoPath!;
+      final position = videoService.currentPosition;
+      final subtitlePath = videoService.currentSubtitlePath ?? ''; // 如果字幕路径为空，使用空字符串
+      
+      final videoName = path.basename(videoPath);
+      
+      final lastState = VideoHistory(
+        videoPath: videoPath,
+        subtitlePath: subtitlePath,
+        videoName: videoName,
+        lastPosition: position,
+        timestamp: DateTime.now(),
+      );
+      
+      // 完全保存状态
+      await historyService.saveLastPlayState(lastState);
+      debugPrint("全局方法成功保存状态: $videoName - ${position.inSeconds}秒");
+    } else {
+      debugPrint("视频服务或历史服务不可用，或者没有正在播放的视频");
+    }
+  } catch (e) {
+    debugPrint("全局保存状态时出错: $e");
   }
 }
