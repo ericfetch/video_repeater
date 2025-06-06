@@ -626,6 +626,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     vocabularyService.loadAllVocabularyLists();
   }
   
+  // 保存当前播放状态
+  void _saveLastPlayState() {
+    final videoService = Provider.of<VideoService>(context, listen: false);
+    final historyService = Provider.of<HistoryService>(context, listen: false);
+    
+    if (_currentVideoPath != null && videoService.player != null) {
+      final videoName = path.basename(_currentVideoPath!);
+      final position = videoService.currentPosition;
+      final subtitlePath = _currentSubtitlePath ?? '';
+      final subtitleTimeOffset = videoService.subtitleTimeOffset;
+      
+      final lastState = VideoHistory(
+        videoPath: _currentVideoPath!,
+        subtitlePath: subtitlePath,
+        videoName: videoName,
+        lastPosition: position,
+        timestamp: DateTime.now(),
+        subtitleTimeOffset: subtitleTimeOffset,
+      );
+      
+      historyService.saveLastPlayState(lastState);
+      debugPrint('保存当前播放状态: $videoName - ${position.inSeconds}秒, 字幕偏移: ${subtitleTimeOffset/1000}秒');
+    }
+  }
+  
   // 恢复最后的播放状态
   Future<void> _restoreLastPlayState() async {
     try {
@@ -637,7 +662,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       debugPrint('尝试恢复最后播放状态...');
       
       if (lastState != null) {
-        debugPrint('找到最后的播放状态: ${lastState.videoName}, 路径: ${lastState.videoPath}, 位置: ${lastState.lastPosition.inSeconds}秒');
+        debugPrint('找到最后的播放状态: ${lastState.videoName}, 路径: ${lastState.videoPath}, 位置: ${lastState.lastPosition.inSeconds}秒, 字幕偏移: ${lastState.subtitleTimeOffset/1000}秒');
         
         // 检查视频文件是否存在
         final videoFile = File(lastState.videoPath);
@@ -664,7 +689,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _currentSubtitlePath = lastState.subtitlePath;
               final subtitleSuccess = await videoService.loadSubtitle(lastState.subtitlePath);
               
-              if (!subtitleSuccess) {
+              if (subtitleSuccess) {
+                // 恢复字幕时间偏移
+                if (lastState.subtitleTimeOffset != 0) {
+                  // 计算需要调整的秒数
+                  final offsetSeconds = lastState.subtitleTimeOffset / 1000;
+                  debugPrint('恢复字幕时间偏移: ${offsetSeconds}秒');
+                  
+                  // 重置后设置正确的偏移值
+                  videoService.resetSubtitleTime();
+                  videoService.adjustSubtitleTime(offsetSeconds.toInt());
+                }
+              } else {
                 debugPrint('字幕加载失败');
               }
             } else {
@@ -729,29 +765,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     
     debugPrint('视频加载超时，无法跳转到指定位置');
     _showSnackBar('无法恢复播放进度，请手动操作');
-  }
-  
-  // 保存当前播放状态
-  void _saveLastPlayState() {
-    final videoService = Provider.of<VideoService>(context, listen: false);
-    final historyService = Provider.of<HistoryService>(context, listen: false);
-    
-    if (_currentVideoPath != null && videoService.player != null) {
-      final videoName = path.basename(_currentVideoPath!);
-      final position = videoService.currentPosition;
-      final subtitlePath = _currentSubtitlePath ?? '';
-      
-      final lastState = VideoHistory(
-        videoPath: _currentVideoPath!,
-        subtitlePath: subtitlePath,
-        videoName: videoName,
-        lastPosition: position,
-        timestamp: DateTime.now(),
-      );
-      
-      historyService.saveLastPlayState(lastState);
-      debugPrint('保存当前播放状态: $videoName - ${position.inSeconds}秒');
-    }
   }
   
   // 启动隐藏AppBar的定时器

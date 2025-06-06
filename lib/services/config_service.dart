@@ -18,6 +18,11 @@ class ConfigService extends ChangeNotifier {
     'subtitleBackgroundColor': 0x80000000, // 半透明黑色
     'subtitleFontWeight': 'normal', // normal, bold
     
+    // 字幕自动匹配设置
+    'autoMatchSubtitle': true, // 是否自动尝试匹配字幕
+    'subtitleMatchMode': 'same', // 字幕匹配模式: same(与视频同名), suffix(添加后缀)
+    'subtitleSuffixes': ['_en', '.en', '-en', '_chs', '.chs', '-chs'], // 字幕后缀列表
+    
     // 界面设置
     'darkMode': false,
   };
@@ -49,6 +54,16 @@ class ConfigService extends ChangeNotifier {
   // 获取字幕字体粗细
   FontWeight get subtitleFontWeight => 
       _config['subtitleFontWeight'] == 'bold' ? FontWeight.bold : FontWeight.normal;
+      
+  // 获取是否自动匹配字幕
+  bool get autoMatchSubtitle => _config['autoMatchSubtitle'] ?? true;
+  
+  // 获取字幕匹配模式
+  String get subtitleMatchMode => _config['subtitleMatchMode'] ?? 'same';
+  
+  // 获取字幕后缀列表
+  List<String> get subtitleSuffixes => 
+      List<String>.from(_config['subtitleSuffixes'] ?? ['_en', '.en', '-en', '_chs', '.chs', '-chs']);
   
   // 获取暗黑模式
   bool get darkMode => _config['darkMode'];
@@ -134,6 +149,27 @@ class ConfigService extends ChangeNotifier {
   // 更新字幕字体粗细
   Future<void> updateSubtitleFontWeight(bool isBold) async {
     _config['subtitleFontWeight'] = isBold ? 'bold' : 'normal';
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新字幕自动匹配设置
+  Future<void> updateAutoMatchSubtitle(bool autoMatch) async {
+    _config['autoMatchSubtitle'] = autoMatch;
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新字幕匹配模式
+  Future<void> updateSubtitleMatchMode(String mode) async {
+    _config['subtitleMatchMode'] = mode;
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新字幕后缀列表
+  Future<void> updateSubtitleSuffixes(List<String> suffixes) async {
+    _config['subtitleSuffixes'] = suffixes;
     await saveConfig();
     notifyListeners();
   }

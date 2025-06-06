@@ -11,14 +11,14 @@ class MessageService extends ChangeNotifier {
   String? get message => _message;
   
   // 显示消息
-  void showMessage(String message) {
+  void showMessage(String message, {int durationMs = 1000}) {
     _message = message;
     
     // 取消可能存在的定时器
     _messageTimer?.cancel();
     
     // 设置一个定时器，在短暂显示后清除消息
-    _messageTimer = Timer(const Duration(milliseconds: 1000), () {
+    _messageTimer = Timer(Duration(milliseconds: durationMs), () {
       _message = null;
       notifyListeners();
     });

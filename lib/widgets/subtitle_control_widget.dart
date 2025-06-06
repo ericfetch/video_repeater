@@ -21,6 +21,8 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
   double _currentRate = 1.0;
   // 是否模糊字幕
   bool _isSubtitleBlurred = false;
+  // 用于保存上次的音量
+  double _lastVolume = 100;
   
   // 获取字幕模糊状态
   bool get isSubtitleBlurred => _isSubtitleBlurred;
@@ -191,10 +193,38 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
-                          _currentVolume > 0 ? Icons.volume_up : Icons.volume_off,
-                          color: Colors.white,
-                          size: 20,
+                        // 可点击的音量图标，用于快速静音/恢复
+                        InkWell(
+                          onTap: () {
+                            // 如果当前音量大于0，则静音；否则恢复到上次的音量
+                            if (_currentVolume > 0) {
+                              // 保存当前音量，用于恢复
+                              setState(() {
+                                _lastVolume = _currentVolume;
+                                _currentVolume = 0;
+                              });
+                              player.setVolume(0);
+                              final messageService = Provider.of<MessageService>(context, listen: false);
+                              messageService.showMessage('静音');
+                            } else {
+                              // 恢复到上次的音量，如果没有上次音量，则设为50
+                              final volumeToRestore = _lastVolume > 0 ? _lastVolume : 50.0;
+                              setState(() {
+                                _currentVolume = volumeToRestore;
+                              });
+                              player.setVolume(volumeToRestore);
+                              final messageService = Provider.of<MessageService>(context, listen: false);
+                              messageService.showMessage('音量: ${volumeToRestore.toInt()}%');
+                            }
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(4.0),
+                            child: Icon(
+                              _currentVolume > 0 ? Icons.volume_up : Icons.volume_off,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
                         ),
                         SizedBox(
                           width: 100,
@@ -208,6 +238,9 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                             onChanged: (value) {
                               setState(() {
                                 _currentVolume = value;
+                                if (value > 0) {
+                                  _lastVolume = value; // 更新上次音量
+                                }
                               });
                               player.setVolume(value);
                             },
@@ -357,6 +390,89 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                       tooltip: _isSubtitleBlurred ? '显示字幕' : '模糊字幕',
                       constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                       padding: const EdgeInsets.all(8),
+                    ),
+                    
+                    // 字幕时间校正按钮组
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[800],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: videoService.subtitleTimeOffset != 0 
+                              ? Colors.amber 
+                              : Colors.grey[600]!,
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // 字幕时间后退按钮
+                          IconButton(
+                            icon: const Icon(Icons.remove_circle, color: Colors.white, size: 20),
+                            tooltip: '字幕时间 -1秒',
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            constraints: const BoxConstraints(),
+                            onPressed: () {
+                              videoService.adjustSubtitleTime(-1);
+                              final messageService = Provider.of<MessageService>(context, listen: false);
+                              messageService.showMessage('字幕时间 -1秒 (总偏移: ${videoService.subtitleTimeOffset / 1000}秒)');
+                            },
+                          ),
+                          
+                          // 字幕时间偏移显示
+                          GestureDetector(
+                            onTap: () {
+                              videoService.resetSubtitleTime();
+                              final messageService = Provider.of<MessageService>(context, listen: false);
+                              messageService.showMessage('字幕时间偏移已重置');
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.black54,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.access_time,
+                                    color: Colors.white70,
+                                    size: 14,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '${(videoService.subtitleTimeOffset / 1000).toStringAsFixed(1)}s',
+                                    style: TextStyle(
+                                      color: videoService.subtitleTimeOffset == 0 
+                                          ? Colors.white70 
+                                          : Colors.amber,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          
+                          // 字幕时间前进按钮
+                          IconButton(
+                            icon: const Icon(Icons.add_circle, color: Colors.white, size: 20),
+                            tooltip: '字幕时间 +1秒',
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            constraints: const BoxConstraints(),
+                            onPressed: () {
+                              videoService.adjustSubtitleTime(1);
+                              final messageService = Provider.of<MessageService>(context, listen: false);
+                              messageService.showMessage('字幕时间 +1秒 (总偏移: ${videoService.subtitleTimeOffset / 1000}秒)');
+                            },
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),

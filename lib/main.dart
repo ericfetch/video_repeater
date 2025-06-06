@@ -296,78 +296,77 @@ class MessageOverlay extends StatelessWidget {
 class WindowManagerListener extends WindowListener {
   @override
   void onWindowClose() async {
-    debugPrint("窗口关闭事件触发，暂停视频并保存当前播放状态");
+    bool isPreventClose = false;
     
     try {
-      // 先暂停视频播放
-      final videoService = AppServices.videoService;
-      if (videoService != null && videoService.player != null && videoService.player!.state.playing) {
-        await videoService.player!.pause();
-        debugPrint("已暂停视频播放");
+      // 显示保存进度提示
+      final messageService = AppServices.messageService;
+      if (messageService != null) {
+        messageService.showMessage('正在保存播放进度...', durationMs: 2000);
       }
       
-      // 创建一个计时器，如果保存操作超过1.5秒，就直接关闭窗口
-      final closeTimer = Timer(const Duration(milliseconds: 1500), () async {
-        debugPrint("保存操作超时，直接关闭窗口");
-        await windowManager.destroy();
-      });
+      // 暂停视频播放
+      final videoService = AppServices.videoService;
+      if (videoService != null && videoService.player != null && videoService.player!.state.playing) {
+        debugPrint('窗口关闭事件触发，暂停视频并保存当前播放状态');
+        await videoService.player!.pause();
+        debugPrint('已暂停视频播放');
+      }
       
-      // 尝试保存状态，但设置超时机制
-      saveLastPlayStateGlobal().timeout(
-        const Duration(milliseconds: 1000),
-        onTimeout: () {
-          debugPrint("保存状态操作超时");
-          return;
-        }
-      ).whenComplete(() {
-        if (closeTimer.isActive) {
-          closeTimer.cancel();
-          windowManager.destroy();
-        }
-      });
+      // 保存当前播放状态
+      await saveLastPlayStateGlobal();
+      
+      // 短暂延迟，确保用户能看到保存提示
+      await Future.delayed(const Duration(milliseconds: 800));
+      
+      // 允许窗口关闭
+      windowManager.destroy();
     } catch (e) {
-      debugPrint("窗口关闭处理错误: $e");
-      // 出错也允许窗口关闭
-      await windowManager.destroy();
+      debugPrint('窗口关闭处理错误: $e');
+      // 出错时也允许关闭窗口
+      if (!isPreventClose) {
+        windowManager.destroy();
+      }
     }
   }
 }
 
-// 全局保存方法
+/// 全局方法：保存最后的播放状态
+/// 在应用关闭时调用
 Future<void> saveLastPlayStateGlobal() async {
   try {
-    debugPrint("尝试使用全局方法保存状态");
+    debugPrint('应用关闭，保存最后播放状态');
     
-    // 从全局服务获取数据
+    // 获取服务实例
     final videoService = AppServices.videoService;
     final historyService = AppServices.historyService;
     
+    // 确保服务和视频已加载
     if (videoService != null && 
         historyService != null && 
         videoService.player != null && 
         videoService.currentVideoPath != null) {
       
-      final videoPath = videoService.currentVideoPath!;
+      final videoName = path.basename(videoService.currentVideoPath!);
       final position = videoService.currentPosition;
-      final subtitlePath = videoService.currentSubtitlePath ?? ''; // 如果字幕路径为空，使用空字符串
-      
-      final videoName = path.basename(videoPath);
+      final subtitlePath = videoService.currentSubtitlePath ?? '';
+      final subtitleTimeOffset = videoService.subtitleTimeOffset;
       
       final lastState = VideoHistory(
-        videoPath: videoPath,
+        videoPath: videoService.currentVideoPath!,
         subtitlePath: subtitlePath,
         videoName: videoName,
         lastPosition: position,
         timestamp: DateTime.now(),
+        subtitleTimeOffset: subtitleTimeOffset,
       );
       
-      // 完全保存状态
       await historyService.saveLastPlayState(lastState);
-      debugPrint("全局方法成功保存状态: $videoName - ${position.inSeconds}秒");
+      debugPrint('成功保存最后播放状态: $videoName - ${position.inSeconds}秒, 字幕偏移: ${subtitleTimeOffset/1000}秒');
     } else {
-      debugPrint("视频服务或历史服务不可用，或者没有正在播放的视频");
+      debugPrint('无法保存播放状态：未加载视频或播放器未初始化');
     }
   } catch (e) {
-    debugPrint("全局保存状态时出错: $e");
+    debugPrint('保存最后播放状态时发生错误: $e');
   }
 }

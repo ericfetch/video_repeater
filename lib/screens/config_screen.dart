@@ -1,19 +1,49 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/config_service.dart';
-import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import '../services/video_service.dart';
 
-class ConfigScreen extends StatefulWidget {
+class ConfigScreen extends StatelessWidget {
   const ConfigScreen({super.key});
 
   @override
-  State<ConfigScreen> createState() => _ConfigScreenState();
+  Widget build(BuildContext context) {
+    // 在打开设置页面时暂停视频
+    final videoService = Provider.of<VideoService>(context, listen: false);
+    final wasPlaying = videoService.player?.state.playing ?? false;
+    if (wasPlaying) {
+      videoService.player?.pause();
+    }
+    
+    // 使用StatelessWidget和Builder模式，避免整个界面随Provider状态变化而重建
+    return _ConfigScreenContent(wasPlaying: wasPlaying);
+  }
 }
 
-class _ConfigScreenState extends State<ConfigScreen> {
+class _ConfigScreenContent extends StatefulWidget {
+  final bool wasPlaying;
+  
+  const _ConfigScreenContent({required this.wasPlaying});
+  
+  @override
+  _ConfigScreenContentState createState() => _ConfigScreenContentState();
+}
+
+class _ConfigScreenContentState extends State<_ConfigScreenContent> {
+  // 文本编辑控制器
   final _playbackRatesController = TextEditingController();
   final _loopWaitIntervalController = TextEditingController();
   final _subtitleFontSizeController = TextEditingController();
+  final _subtitleSuffixesController = TextEditingController();
+  
+  // 设置值
+  bool _isDarkMode = false;
+  bool _isBoldFont = false;
+  bool _autoMatchSubtitle = true;
+  String _subtitleMatchMode = 'same';
+  
+  // 确保只初始化一次
+  bool _initialized = false;
   
   @override
   void initState() {
@@ -21,470 +51,396 @@ class _ConfigScreenState extends State<ConfigScreen> {
     
     // 延迟初始化，确保Provider已经准备好
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _initControllers();
+      _loadConfig();
     });
   }
   
-  void _initControllers() {
+  void _loadConfig() {
+    if (_initialized) return;
+    
     final configService = Provider.of<ConfigService>(context, listen: false);
     
+    // 更新控制器
     _playbackRatesController.text = configService.playbackRates.join(', ');
     _loopWaitIntervalController.text = configService.loopWaitInterval.toString();
     _subtitleFontSizeController.text = configService.subtitleFontSize.toString();
+    _subtitleSuffixesController.text = configService.subtitleSuffixes.join(', ');
+    
+    // 更新设置值
+    setState(() {
+      _isDarkMode = configService.darkMode;
+      _isBoldFont = configService.subtitleFontWeight == FontWeight.bold;
+      _autoMatchSubtitle = configService.autoMatchSubtitle;
+      _subtitleMatchMode = configService.subtitleMatchMode;
+      _initialized = true;
+    });
   }
   
   @override
   void dispose() {
-    // 保存所有更改
-    _saveAllChanges();
-    
     _playbackRatesController.dispose();
     _loopWaitIntervalController.dispose();
     _subtitleFontSizeController.dispose();
+    _subtitleSuffixesController.dispose();
+    
+    // 恢复视频播放状态
+    if (widget.wasPlaying) {
+      final videoService = Provider.of<VideoService>(context, listen: false);
+      videoService.player?.play();
+    }
+    
     super.dispose();
   }
   
-  // 保存所有更改
-  void _saveAllChanges() {
+  // 保存配置
+  void _saveConfig() {
     final configService = Provider.of<ConfigService>(context, listen: false);
     
-    // 保存播放速度选项
+    // 解析播放速度
     try {
       final rates = _playbackRatesController.text.split(',')
           .map((e) => double.parse(e.trim()))
           .toList();
       configService.updatePlaybackRates(rates);
     } catch (e) {
-      // 如果格式错误，保持原值
+      debugPrint('解析播放速度失败: $e');
     }
     
-    // 保存循环等待间隔
+    // 解析循环等待间隔
     try {
       final interval = int.parse(_loopWaitIntervalController.text);
       configService.updateLoopWaitInterval(interval);
     } catch (e) {
-      // 如果格式错误，保持原值
+      debugPrint('解析循环等待间隔失败: $e');
     }
     
-    // 保存字幕字体大小
+    // 解析字幕字体大小
     try {
       final size = double.parse(_subtitleFontSizeController.text);
       if (size >= 12.0 && size <= 30.0) {
         configService.updateSubtitleFontSize(size);
       }
     } catch (e) {
-      // 如果格式错误，保持原值
+      debugPrint('解析字幕字体大小失败: $e');
     }
+    
+    // 解析字幕后缀
+    try {
+      final suffixes = _subtitleSuffixesController.text.split(',')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+      configService.updateSubtitleSuffixes(suffixes);
+    } catch (e) {
+      debugPrint('解析字幕后缀失败: $e');
+    }
+    
+    // 保存其他设置
+    configService.updateSubtitleFontWeight(_isBoldFont);
+    configService.updateAutoMatchSubtitle(_autoMatchSubtitle);
+    configService.updateSubtitleMatchMode(_subtitleMatchMode);
+    configService.updateDarkMode(_isDarkMode);
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('设置已保存')),
+    );
+  }
+  
+  // 重置为默认设置
+  void _resetToDefault() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('恢复默认设置'),
+        content: const Text('确定要恢复所有设置为默认值吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              final configService = Provider.of<ConfigService>(context, listen: false);
+              configService.resetToDefault();
+              Navigator.of(context).pop();
+              _loadConfig(); // 重新加载配置
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final configService = Provider.of<ConfigService>(context);
-    
     return WillPopScope(
       onWillPop: () async {
-        _saveAllChanges();
+        // 保存设置
+        _saveConfig();
+        
+        // 恢复视频播放状态
+        if (widget.wasPlaying) {
+          final videoService = Provider.of<VideoService>(context, listen: false);
+          videoService.player?.play();
+        }
+        
         return true;
       },
       child: Scaffold(
         appBar: AppBar(
           title: const Text('设置'),
           actions: [
-            // 保存按钮
             IconButton(
               icon: const Icon(Icons.save),
               tooltip: '保存设置',
-              onPressed: () {
-                _saveAllChanges();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('设置已保存')),
-                );
-              },
+              onPressed: _saveConfig,
             ),
             IconButton(
               icon: const Icon(Icons.restore),
               tooltip: '恢复默认设置',
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('恢复默认设置'),
-                    content: const Text('确定要恢复所有设置为默认值吗？'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('取消'),
+              onPressed: _resetToDefault,
+            ),
+          ],
+        ),
+        // 使用NotificationListener拦截滚动事件，避免不必要的重建
+        body: NotificationListener<ScrollNotification>(
+          onNotification: (_) => true,
+          child: ListView(
+            padding: const EdgeInsets.all(16.0),
+            children: [
+              // 播放设置
+              const Text(
+                '播放设置',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const Divider(),
+              
+              // 播放速度选项 - 使用StatefulBuilder隔离重建范围
+              StatefulBuilder(
+                builder: (context, setState) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('播放速度选项'),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _playbackRatesController,
+                        decoration: const InputDecoration(
+                          hintText: '例如: 0.5, 0.75, 1.0, 1.25, 1.5, 2.0',
+                          border: OutlineInputBorder(),
+                        ),
                       ),
-                      TextButton(
-                        onPressed: () {
-                          configService.resetToDefault();
-                          _initControllers();
-                          Navigator.of(context).pop();
-                        },
-                        child: const Text('确定'),
+                      const SizedBox(height: 4),
+                      const Text(
+                        '用逗号分隔的数字列表',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
                       ),
                     ],
                   ),
-                );
-              },
-            ),
-          ],
-        ),
-        body: ListView(
-          padding: const EdgeInsets.all(16.0),
-          children: [
-            // 播放速度设置
-            const _SectionHeader(title: '播放设置'),
-            
-            // 播放速度选项
-            _SettingItem(
-              title: '播放速度选项',
-              subtitle: '可选的播放速度列表，用逗号分隔',
-              child: TextField(
-                controller: _playbackRatesController,
-                decoration: const InputDecoration(
-                  hintText: '例如: 0.5, 0.75, 1.0, 1.25, 1.5, 2.0',
-                  border: OutlineInputBorder(),
                 ),
-                keyboardType: TextInputType.text,
-                onChanged: (value) {
-                  // 实时更新，但不保存
-                },
-                onSubmitted: (value) {
-                  try {
-                    final rates = value.split(',')
-                        .map((e) => double.parse(e.trim()))
-                        .toList();
-                    configService.updatePlaybackRates(rates);
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('格式错误，请使用逗号分隔的数字')),
-                    );
-                  }
-                },
               ),
-            ),
-            
-            // 默认播放速度
-            _SettingItem(
-              title: '默认播放速度',
-              subtitle: '视频加载后的初始播放速度',
-              child: DropdownButton<double>(
-                value: configService.defaultPlaybackRate,
-                items: configService.playbackRates.map((rate) {
-                  return DropdownMenuItem<double>(
-                    value: rate,
-                    child: Text('${rate}x'),
-                  );
-                }).toList(),
-                onChanged: (value) {
-                  if (value != null) {
-                    configService.updateDefaultPlaybackRate(value);
-                  }
-                },
-              ),
-            ),
-            
-            // 循环设置
-            const _SectionHeader(title: '循环设置'),
-            
-            // 循环等待间隔
-            _SettingItem(
-              title: '循环等待间隔',
-              subtitle: '字幕循环播放时的等待时间（毫秒）',
-              child: TextField(
-                controller: _loopWaitIntervalController,
-                decoration: const InputDecoration(
-                  hintText: '例如: 2000',
-                  border: OutlineInputBorder(),
-                  suffixText: '毫秒',
-                ),
-                keyboardType: TextInputType.number,
-                onChanged: (value) {
-                  // 实时更新，但不保存
-                },
-                onSubmitted: (value) {
-                  try {
-                    final interval = int.parse(value);
-                    configService.updateLoopWaitInterval(interval);
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('请输入有效的数字')),
-                    );
-                  }
-                },
-              ),
-            ),
-            
-            // 字幕设置
-            const _SectionHeader(title: '字幕设置'),
-            
-            // 字幕字体大小
-            _SettingItem(
-              title: '字幕字体大小',
-              subtitle: '调整字幕文本的大小',
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Slider(
-                      value: configService.subtitleFontSize,
-                      min: 12.0,
-                      max: 30.0,
-                      divisions: 18,
-                      label: configService.subtitleFontSize.toStringAsFixed(1),
-                      onChanged: (value) {
-                        configService.updateSubtitleFontSize(value);
-                        _subtitleFontSizeController.text = value.toStringAsFixed(1);
-                      },
-                    ),
-                  ),
-                  SizedBox(
-                    width: 50,
-                    child: TextField(
-                      controller: _subtitleFontSizeController,
-                      decoration: const InputDecoration(
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              
+              // 循环等待间隔 - 使用StatefulBuilder隔离重建范围
+              StatefulBuilder(
+                builder: (context, setState) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('循环等待间隔(毫秒)'),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _loopWaitIntervalController,
+                        decoration: const InputDecoration(
+                          hintText: '例如: 2000',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.number,
                       ),
-                      keyboardType: TextInputType.number,
-                      textAlign: TextAlign.center,
-                      onSubmitted: (value) {
-                        try {
-                          final size = double.parse(value);
-                          if (size >= 12.0 && size <= 30.0) {
-                            configService.updateSubtitleFontSize(size);
+                      const SizedBox(height: 4),
+                      const Text(
+                        '循环播放时在字幕结束后等待的时间',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              
+              const SizedBox(height: 24),
+              
+              // 字幕设置
+              const Text(
+                '字幕设置',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const Divider(),
+              
+              // 字幕字体大小 - 使用StatefulBuilder隔离重建范围
+              StatefulBuilder(
+                builder: (context, setState) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('字幕字体大小'),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _subtitleFontSizeController,
+                        decoration: const InputDecoration(
+                          hintText: '例如: 16',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.number,
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        '字幕文本的字体大小(12-30)',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              
+              // 字幕字体粗细 - 使用StatefulBuilder隔离重建范围
+              StatefulBuilder(
+                builder: (context, setState) => SwitchListTile(
+                  title: const Text('字幕粗体显示'),
+                  subtitle: const Text('使用粗体显示字幕文本'),
+                  value: _isBoldFont,
+                  onChanged: (value) {
+                    setState(() {
+                      _isBoldFont = value;
+                    });
+                  },
+                ),
+              ),
+              
+              const SizedBox(height: 24),
+              
+              // 字幕自动匹配设置
+              const Text(
+                '字幕自动匹配设置',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const Divider(),
+              
+              // 启用自动匹配 - 使用StatefulBuilder隔离重建范围
+              StatefulBuilder(
+                builder: (context, setState) => SwitchListTile(
+                  title: const Text('自动匹配字幕'),
+                  subtitle: const Text('加载视频时自动尝试匹配字幕文件'),
+                  value: _autoMatchSubtitle,
+                  onChanged: (value) {
+                    setState(() {
+                      _autoMatchSubtitle = value;
+                    });
+                  },
+                ),
+              ),
+              
+              // 字幕匹配模式 - 使用StatefulBuilder隔离重建范围
+              StatefulBuilder(
+                builder: (context, setState) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            Text('字幕匹配模式'),
+                            SizedBox(height: 4),
+                            Text(
+                              '选择字幕文件的匹配方式',
+                              style: TextStyle(fontSize: 12, color: Colors.grey),
+                            ),
+                          ],
+                        ),
+                      ),
+                      DropdownButton<String>(
+                        value: _subtitleMatchMode,
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() {
+                              _subtitleMatchMode = value;
+                            });
                           }
-                        } catch (e) {
-                          // 恢复为当前值
-                          _subtitleFontSizeController.text = 
-                              configService.subtitleFontSize.toStringAsFixed(1);
-                        }
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            
-            // 字幕字体粗细
-            _SettingItem(
-              title: '字幕字体粗细',
-              subtitle: '设置字幕文本是否加粗',
-              child: Switch(
-                value: configService.subtitleFontWeight == FontWeight.bold,
-                onChanged: (value) {
-                  configService.updateSubtitleFontWeight(value);
-                },
-              ),
-            ),
-            
-            // 字幕颜色
-            _SettingItem(
-              title: '字幕颜色',
-              subtitle: '设置字幕文本的颜色',
-              child: InkWell(
-                onTap: () {
-                  _showColorPicker(
-                    context, 
-                    configService.subtitleColor,
-                    (color) => configService.updateSubtitleColor(color),
-                  );
-                },
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: configService.subtitleColor,
-                    border: Border.all(color: Colors.grey),
-                    borderRadius: BorderRadius.circular(8),
+                        },
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'same',
+                            child: Text('与视频同名'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'suffix',
+                            child: Text('添加后缀'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'both',
+                            child: Text('两者都尝试'),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ),
-            ),
-            
-            // 字幕背景颜色
-            _SettingItem(
-              title: '字幕背景颜色',
-              subtitle: '设置字幕背景的颜色',
-              child: InkWell(
-                onTap: () {
-                  _showColorPicker(
-                    context, 
-                    configService.subtitleBackgroundColor,
-                    (color) => configService.updateSubtitleBackgroundColor(color),
-                  );
-                },
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: configService.subtitleBackgroundColor,
-                    border: Border.all(color: Colors.grey),
-                    borderRadius: BorderRadius.circular(8),
+              
+              // 字幕后缀列表 - 使用StatefulBuilder隔离重建范围
+              StatefulBuilder(
+                builder: (context, setState) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('字幕后缀列表'),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _subtitleSuffixesController,
+                        decoration: const InputDecoration(
+                          hintText: '例如: _en, .en, -en, _chs',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        '用逗号分隔的后缀列表',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
                   ),
                 ),
               ),
-            ),
-            
-            // 界面设置
-            const _SectionHeader(title: '界面设置'),
-            
-            // 暗黑模式
-            _SettingItem(
-              title: '暗黑模式',
-              subtitle: '切换应用的明暗主题',
-              child: Switch(
-                value: configService.darkMode,
-                onChanged: (value) {
-                  configService.updateDarkMode(value);
-                },
+              
+              const SizedBox(height: 24),
+              
+              // 界面设置
+              const Text(
+                '界面设置',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-            ),
-            
-            // 预览区域
-            const SizedBox(height: 20),
-            const _SectionHeader(title: '字幕预览'),
-            Container(
-              margin: const EdgeInsets.symmetric(vertical: 16),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.grey[900],
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: configService.subtitleBackgroundColor,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    '这是字幕预览文本',
-                    style: TextStyle(
-                      color: configService.subtitleColor,
-                      fontSize: configService.subtitleFontSize,
-                      fontWeight: configService.subtitleFontWeight,
-                    ),
-                  ),
+              const Divider(),
+              
+              // 暗黑模式 - 使用StatefulBuilder隔离重建范围
+              StatefulBuilder(
+                builder: (context, setState) => SwitchListTile(
+                  title: const Text('暗黑模式'),
+                  subtitle: const Text('使用暗色主题'),
+                  value: _isDarkMode,
+                  onChanged: (value) {
+                    setState(() {
+                      _isDarkMode = value;
+                    });
+                  },
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
-    );
-  }
-  
-  void _showColorPicker(BuildContext context, Color currentColor, Function(Color) onColorChanged) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        Color pickerColor = currentColor;
-        
-        return AlertDialog(
-          title: const Text('选择颜色'),
-          content: SingleChildScrollView(
-            child: ColorPicker(
-              pickerColor: pickerColor,
-              onColorChanged: (color) {
-                pickerColor = color;
-              },
-              pickerAreaHeightPercent: 0.8,
-              enableAlpha: true,
-              displayThumbColor: true,
-              showLabel: true,
-              paletteType: PaletteType.hsv,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('取消'),
-            ),
-            TextButton(
-              onPressed: () {
-                onColorChanged(pickerColor);
-                Navigator.of(context).pop();
-              },
-              child: const Text('确定'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-// 设置分组标题
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  
-  const _SectionHeader({required this.title});
-  
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Text(
-        title,
-        style: TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.bold,
-          color: Theme.of(context).primaryColor,
-        ),
-      ),
-    );
-  }
-}
-
-// 设置项
-class _SettingItem extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final Widget child;
-  
-  const _SettingItem({
-    required this.title,
-    required this.subtitle,
-    required this.child,
-  });
-  
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            flex: 3,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[600],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            flex: 2,
-            child: child,
-          ),
-        ],
       ),
     );
   }
