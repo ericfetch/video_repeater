@@ -8,7 +8,12 @@ import '../models/subtitle_model.dart';
 import 'subtitle_selection_area.dart';
 
 class SubtitleControlWidget extends StatefulWidget {
-  const SubtitleControlWidget({super.key});
+  final VideoService? videoService;
+  
+  const SubtitleControlWidget({
+    super.key,
+    this.videoService,
+  });
   
   @override
   SubtitleControlWidgetState createState() => SubtitleControlWidgetState();
@@ -44,7 +49,7 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
   }
   
   void _initializeValues() {
-    final videoService = Provider.of<VideoService>(context, listen: false);
+    final videoService = widget.videoService ?? Provider.of<VideoService>(context, listen: false);
     final configService = Provider.of<ConfigService>(context, listen: false);
     final player = videoService.player;
     if (player != null) {
@@ -81,7 +86,7 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
   
   @override
   Widget build(BuildContext context) {
-    final videoService = Provider.of<VideoService>(context);
+    final videoService = widget.videoService ?? Provider.of<VideoService>(context);
     final vocabularyService = Provider.of<VocabularyService>(context);
     final currentSubtitle = videoService.currentSubtitle;
     final player = videoService.player;
@@ -148,14 +153,23 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                 trackShape: CustomTrackShape(),
               ),
               child: Slider(
-                value: videoService.currentPosition.inMilliseconds.toDouble(),
+                value: videoService.currentPosition.inMilliseconds.toDouble().clamp(
+                  0,
+                  videoService.duration.inMilliseconds > 0 
+                    ? videoService.duration.inMilliseconds.toDouble()
+                    : 1.0
+                ),
                 min: 0,
                 max: videoService.duration.inMilliseconds > 0 
                   ? videoService.duration.inMilliseconds.toDouble()
                   : 1.0, // 防止除以零错误
                 onChanged: (value) {
                   final position = Duration(milliseconds: value.toInt());
-                  videoService.player?.seek(position);
+                  if (videoService.isYouTubeVideo) {
+                    videoService.seek(position);
+                  } else {
+                    videoService.player?.seek(position);
+                  }
                 },
               ),
             ),
@@ -203,7 +217,11 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                                 _lastVolume = _currentVolume;
                                 _currentVolume = 0;
                               });
-                              player.setVolume(0);
+                              if (videoService.isYouTubeVideo) {
+                                videoService.setVolume(0);
+                              } else {
+                                player.setVolume(0);
+                              }
                               final messageService = Provider.of<MessageService>(context, listen: false);
                               messageService.showMessage('静音');
                             } else {
@@ -212,7 +230,11 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                               setState(() {
                                 _currentVolume = volumeToRestore;
                               });
-                              player.setVolume(volumeToRestore);
+                              if (videoService.isYouTubeVideo) {
+                                videoService.setVolume(volumeToRestore);
+                              } else {
+                                player.setVolume(volumeToRestore);
+                              }
                               final messageService = Provider.of<MessageService>(context, listen: false);
                               messageService.showMessage('音量: ${volumeToRestore.toInt()}%');
                             }
@@ -242,7 +264,11 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                                   _lastVolume = value; // 更新上次音量
                                 }
                               });
-                              player.setVolume(value);
+                              if (videoService.isYouTubeVideo) {
+                                videoService.setVolume(value);
+                              } else {
+                                player.setVolume(value);
+                              }
                             },
                           ),
                         ),
@@ -275,7 +301,11 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                                         setState(() {
                                           _currentRate = rate;
                                         });
-                                        player.setRate(rate);
+                                        if (videoService.isYouTubeVideo) {
+                                          videoService.setRate(rate);
+                                        } else {
+                                          player.setRate(rate);
+                                        }
                                         final messageService = Provider.of<MessageService>(context, listen: false);
                                         messageService.showMessage('播放速度: ${rate}x');
                                       },
@@ -311,7 +341,11 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                                       setState(() {
                                         _currentRate = rate;
                                       });
-                                      player.setRate(rate);
+                                      if (videoService.isYouTubeVideo) {
+                                        videoService.setRate(rate);
+                                      } else {
+                                        player.setRate(rate);
+                                      }
                                       final messageService = Provider.of<MessageService>(context, listen: false);
                                       messageService.showMessage('播放速度: ${rate}x');
                                     },

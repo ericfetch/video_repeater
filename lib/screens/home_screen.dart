@@ -14,6 +14,7 @@ import '../widgets/history_list_widget.dart';
 import '../widgets/vocabulary_list_widget.dart';
 import '../models/history_model.dart';
 import '../screens/config_screen.dart';
+import '../screens/youtube_video_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -48,14 +49,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isJustResumed = false;
   Timer? _resumeDebounceTimer;
   
+  // 添加定期检查焦点的定时器
+  Timer? _focusCheckTimer;
+  
   @override
   void initState() {
     super.initState();
     debugPrint('HomeScreen初始化');
-    _focusNode = FocusNode();
+    _focusNode = FocusNode(debugLabel: 'HomeScreenFocus');
     
     // 添加窗口焦点变化的监听
     WidgetsBinding.instance.addObserver(this);
+    
+    // 确保焦点节点在初始化后立即获取焦点
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        FocusScope.of(context).requestFocus(_focusNode);
+        debugPrint('初始化后请求焦点');
+      }
+    });
+    
+    // 添加定期检查焦点的定时器
+    _focusCheckTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (mounted && !_focusNode.hasFocus) {
+        debugPrint('定期检查发现焦点丢失，重新请求焦点');
+        FocusScope.of(context).requestFocus(_focusNode);
+      }
+    });
     
     // 先加载历史记录和生词本
     _loadHistory().then((_) {
@@ -65,7 +85,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // 使用更长的延迟，确保UI和服务都已经初始化
       Future.delayed(const Duration(milliseconds: 1000), () {
         if (mounted) {
-          _focusNode.requestFocus();
+          FocusScope.of(context).requestFocus(_focusNode);
           _restoreLastPlayState();
         }
       });
@@ -88,6 +108,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _focusNode.dispose();
     _hideAppBarTimer?.cancel();
     _resumeDebounceTimer?.cancel();
+    _focusCheckTimer?.cancel(); // 取消焦点检查定时器
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -219,346 +240,346 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   
   @override
   Widget build(BuildContext context) {
-    final videoService = Provider.of<VideoService>(context);
-    final isPlaying = videoService.player?.state.playing ?? false;
-    
-    // 在播放状态变化时更新AppBar显示逻辑
-    if (isPlaying != _isVideoPlaying) {
-      _isVideoPlaying = isPlaying;
-      
-      // 如果暂停，隐藏AppBar
-      if (!isPlaying) {
-        setState(() {
-          _showAppBar = false;
-        });
-      }
-      // 播放状态下不自动显示AppBar，只依靠鼠标移动触发
-    }
-    
-    // 确保焦点在主视频区域
-    if (!_focusNode.hasFocus && !_isJustResumed) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !_focusNode.hasFocus) {
-          _focusNode.requestFocus();
-        }
-      });
-    }
-    
-    return Focus(
-      focusNode: _focusNode,
-      autofocus: true,
-      // 确保该Focus节点始终获得键盘事件的优先处理权
-      onKeyEvent: (_, KeyEvent event) {
-        // 处理空格键和方向键
-        if (event is KeyDownEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.space) {
-            if (!_isJustResumed) {
-              _togglePlayState(videoService);
+    debugPrint('焦点节点状态: ${_focusNode.hasFocus ? "有焦点" : "无焦点"}');
+    return Consumer3<VideoService, HistoryService, VocabularyService>(
+      builder: (context, videoService, historyService, vocabularyService, child) {
+        return Focus(
+          focusNode: _focusNode,
+          autofocus: true,
+          onKeyEvent: (node, event) {
+            debugPrint('Focus接收到键盘事件: ${event.logicalKey.keyLabel}, 类型: ${event.runtimeType}');
+            if (event is KeyDownEvent) {
+              if (event.logicalKey == LogicalKeyboardKey.space) {
+                debugPrint('空格键按下，切换播放状态');
+                if (!_isJustResumed) {
+                  _togglePlayState(videoService);
+                }
+                return KeyEventResult.handled;
+              } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                debugPrint('左箭头按下，回退5秒');
+                videoService.seek(Duration(milliseconds: 
+                  (videoService.currentPosition.inMilliseconds - 5000).clamp(0, videoService.duration.inMilliseconds)
+                ));
+                _showSnackBar('回退5秒');
+                return KeyEventResult.handled;
+              } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                debugPrint('右箭头按下，前进5秒');
+                videoService.seek(Duration(milliseconds: 
+                  (videoService.currentPosition.inMilliseconds + 5000).clamp(0, videoService.duration.inMilliseconds)
+                ));
+                _showSnackBar('前进5秒');
+                return KeyEventResult.handled;
+              } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                debugPrint('上箭头按下，跳转到上一句字幕');
+                videoService.previousSubtitle();
+                _showSnackBar('上一句');
+                return KeyEventResult.handled;
+              } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                debugPrint('下箭头按下，跳转到下一句字幕');
+                videoService.nextSubtitle();
+                _showSnackBar('下一句');
+                return KeyEventResult.handled;
+              } else if (event.logicalKey == LogicalKeyboardKey.keyR) {
+                debugPrint('R键按下，切换循环模式');
+                videoService.toggleLoop();
+                _showSnackBar(videoService.isLooping ? '开始循环' : '停止循环');
+                return KeyEventResult.handled;
+              } else if (event.logicalKey == LogicalKeyboardKey.keyS) {
+                debugPrint('S键按下，切换字幕模糊');
+                final subtitleControlWidget = _subtitleControlKey.currentState;
+                if (subtitleControlWidget != null) {
+                  subtitleControlWidget.toggleSubtitleBlur();
+                  _showSnackBar(subtitleControlWidget.isSubtitleBlurred ? '字幕已模糊' : '字幕已显示');
+                }
+                return KeyEventResult.handled;
+              }
             }
-            return KeyEventResult.handled;
-          } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-            videoService.seek(Duration(milliseconds: 
-              (videoService.currentPosition.inMilliseconds - 5000).clamp(0, videoService.duration.inMilliseconds)
-            ));
-            _showSnackBar('回退5秒');
-            return KeyEventResult.handled;
-          } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-            videoService.seek(Duration(milliseconds: 
-              (videoService.currentPosition.inMilliseconds + 5000).clamp(0, videoService.duration.inMilliseconds)
-            ));
-            _showSnackBar('前进5秒');
-            return KeyEventResult.handled;
-          } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-            videoService.previousSubtitle();
-            _showSnackBar('上一句');
-            return KeyEventResult.handled;
-          } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-            videoService.nextSubtitle();
-            _showSnackBar('下一句');
-            return KeyEventResult.handled;
-          } else if (event.logicalKey == LogicalKeyboardKey.keyR) {
-            videoService.toggleLoop();
-            _showSnackBar(videoService.isLooping ? '开始循环' : '停止循环');
-            return KeyEventResult.handled;
-          } else if (event.logicalKey == LogicalKeyboardKey.keyS) {
-            final subtitleControlWidget = _subtitleControlKey.currentState;
-            if (subtitleControlWidget != null) {
-              subtitleControlWidget.toggleSubtitleBlur();
-              _showSnackBar(subtitleControlWidget.isSubtitleBlurred ? '字幕已模糊' : '字幕已显示');
-              return KeyEventResult.handled;
-            }
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-      child: GestureDetector(
-        // 点击任何区域都重新获取焦点
-        onTap: () => _focusNode.requestFocus(),
-        behavior: HitTestBehavior.translucent,
-        child: Scaffold(
-          key: _scaffoldKey,
-          appBar: null, // 不使用标准AppBar
-          // 使用EndDrawer显示历史记录或生词本
-          endDrawer: Drawer(
-            width: 350,
-            child: Column(
-              children: [
-                AppBar(
-                  title: Text(_showVocabulary ? '生词本' : '观看历史'),
-                  automaticallyImplyLeading: false,
-                  actions: [
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () {
-                        Navigator.pop(context);
-                      },
-                    ),
-                  ],
-                ),
-                // 切换按钮
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    TextButton.icon(
-                      icon: const Icon(Icons.history),
-                      label: const Text('历史记录'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: !_showVocabulary ? Colors.blue : Colors.grey,
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _showVocabulary = false;
-                        });
-                      },
-                    ),
-                    TextButton.icon(
-                      icon: const Icon(Icons.book),
-                      label: const Text('生词本'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: _showVocabulary ? Colors.blue : Colors.grey,
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _showVocabulary = true;
-                        });
-                      },
-                    ),
-                  ],
-                ),
-                const Divider(),
-                Expanded(
-                  child: _showVocabulary
-                      ? const VocabularyListWidget()
-                      : const HistoryListWidget(),
-                ),
-              ],
-            ),
-          ),
-          body: MouseRegion(
-            onHover: _handleMouseMove,
-            onEnter: _handleMouseMove,
-            child: Stack(
-              children: [
-                // 主内容
-                Column(
-                  children: [
-                    // 视频播放区域
-                    Expanded(
-                      child: Column(
-                        children: [
-                          // 视频播放器
-                          Expanded(
-                            child: VideoPlayerWidget(
-                              videoService: videoService,
-                            ),
-                          ),
-                          
-                          // 字幕控制区域
-                          SubtitleControlWidget(
-                            key: _subtitleControlKey,
+            return KeyEventResult.ignored;
+          },
+          child: GestureDetector(
+            onTap: () {
+              setState(() {
+                _showAppBar = !_showAppBar;
+              });
+            },
+            child: ScaffoldMessenger(
+              key: _scaffoldMessengerKey,
+              child: Scaffold(
+                key: _scaffoldKey,
+                // 使用EndDrawer显示历史记录或生词本
+                endDrawer: Drawer(
+                  width: 350,
+                  child: Column(
+                    children: [
+                      AppBar(
+                        title: Text(_showVocabulary ? '生词本' : '观看历史'),
+                        automaticallyImplyLeading: false,
+                        actions: [
+                          IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              Navigator.pop(context);
+                            },
                           ),
                         ],
                       ),
-                    ),
-                  ],
-                ),
-                
-                // 顶部触发区指示条，只在AppBar隐藏时显示
-                if (!_showAppBar)
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.click,
-                      onHover: (event) {
-                        // 立即显示AppBar
-                        setState(() {
-                          _showAppBar = true;
-                        });
-                      },
-                      child: Container(
-                        height: 8,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              Colors.grey.withOpacity(0.1),
-                              Colors.transparent,
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                
-                // 自定义覆盖式AppBar
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 200),
-                  top: _showAppBar ? 0 : -kToolbarHeight,
-                  left: 0,
-                  right: 0,
-                  height: kToolbarHeight,
-                  child: Material(
-                    color: Colors.black.withOpacity(0.6),
-                    elevation: 4,
-                    child: SafeArea(
-                      bottom: false,
-                      child: Row(
+                      // 切换按钮
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: Text(
-                              _appTitle,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
+                          TextButton.icon(
+                            icon: const Icon(Icons.history),
+                            label: const Text('历史记录'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: !_showVocabulary ? Colors.blue : Colors.grey,
                             ),
-                          ),
-                          const Spacer(),
-                          // 选择视频按钮
-                          _SafeIconButton(
-                            icon: const Icon(Icons.video_library, color: Colors.white),
-                            tooltip: '选择视频',
-                            onPressed: () async {
-                              final videoService = Provider.of<VideoService>(context, listen: false);
-                              final videoPath = await videoService.pickVideoFile();
-                              if (videoPath != null) {
-                                _currentVideoPath = videoPath;
-                                _updateAppTitle(videoPath);
-                                _showSnackBar('正在加载视频: ${path.basename(videoPath)}');
-                                final success = await videoService.loadVideo(videoPath);
-                                if (success) {
-                                  _showSnackBar('视频加载成功');
-                                  
-                                  // 加载该视频的生词本
-                                  final videoName = path.basename(videoPath);
-                                  final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
-                                  vocabularyService.setCurrentVideo(videoName);
-                                  vocabularyService.loadVocabularyList(videoName);
-                                }
-                              }
-                              // 操作完成后重新获取主焦点
-                              _focusNode.requestFocus();
-                            },
-                          ),
-                          // 选择字幕按钮
-                          _SafeIconButton(
-                            icon: const Icon(Icons.subtitles, color: Colors.white),
-                            tooltip: '选择字幕',
-                            onPressed: () async {
-                              final videoService = Provider.of<VideoService>(context, listen: false);
-                              if (videoService.player == null) {
-                                _showSnackBar('请先选择视频文件');
-                                return;
-                              }
-                              
-                              final subtitlePath = await videoService.pickSubtitleFile();
-                              if (subtitlePath != null) {
-                                _currentSubtitlePath = subtitlePath;
-                                _showSnackBar('正在加载字幕: ${path.basename(subtitlePath)}');
-                                final success = await videoService.loadSubtitle(subtitlePath);
-                                if (success) {
-                                  _showSnackBar('字幕加载成功');
-                                }
-                              }
-                              // 操作完成后重新获取主焦点
-                              _focusNode.requestFocus();
-                            },
-                          ),
-                          // 帮助按钮
-                          _SafeIconButton(
-                            icon: const Icon(Icons.help_outline, color: Colors.white),
-                            tooltip: '帮助',
-                            onPressed: () {
-                              _showHelpDialog(context);
-                              // 操作完成后重新获取主焦点
-                              _focusNode.requestFocus();
-                            },
-                          ),
-                          // 保存进度按钮
-                          _SafeIconButton(
-                            icon: const Icon(Icons.save, color: Colors.white),
-                            tooltip: '保存进度',
-                            onPressed: () {
-                              _saveCurrentProgress();
-                              _showSnackBar('已保存当前进度');
-                              // 操作完成后重新获取主焦点
-                              _focusNode.requestFocus();
-                            },
-                          ),
-                          // 设置按钮
-                          _SafeIconButton(
-                            icon: const Icon(Icons.settings, color: Colors.white),
-                            tooltip: '设置',
-                            onPressed: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(builder: (context) => const ConfigScreen()),
-                              );
-                              // 操作完成后重新获取主焦点
-                              _focusNode.requestFocus();
-                            },
-                          ),
-                          // 历史记录按钮
-                          _SafeIconButton(
-                            icon: const Icon(Icons.history, color: Colors.white),
-                            tooltip: '查看历史记录',
                             onPressed: () {
                               setState(() {
                                 _showVocabulary = false;
                               });
-                              _scaffoldKey.currentState?.openEndDrawer();
-                              // 操作完成后重新获取主焦点
-                              _focusNode.requestFocus();
                             },
                           ),
-                          // 生词本按钮
-                          _SafeIconButton(
-                            icon: const Icon(Icons.book, color: Colors.white),
-                            tooltip: '查看生词本',
+                          TextButton.icon(
+                            icon: const Icon(Icons.book),
+                            label: const Text('生词本'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: _showVocabulary ? Colors.blue : Colors.grey,
+                            ),
                             onPressed: () {
                               setState(() {
                                 _showVocabulary = true;
                               });
-                              _scaffoldKey.currentState?.openEndDrawer();
-                              // 操作完成后重新获取主焦点
-                              _focusNode.requestFocus();
                             },
                           ),
-                          const SizedBox(width: 8),
                         ],
                       ),
-                    ),
+                      const Divider(),
+                      Expanded(
+                        child: _showVocabulary
+                            ? const VocabularyListWidget()
+                            : const HistoryListWidget(),
+                      ),
+                    ],
                   ),
                 ),
-              ],
+                body: MouseRegion(
+                  onHover: _handleMouseMove,
+                  onEnter: _handleMouseMove,
+                  child: Stack(
+                    children: [
+                      // 主内容
+                      Column(
+                        children: [
+                          // 视频播放区域
+                          Expanded(
+                            child: Column(
+                              children: [
+                                // 视频播放器
+                                Expanded(
+                                  child: VideoPlayerWidget(
+                                    videoService: videoService,
+                                  ),
+                                ),
+                                
+                                // 字幕控制区域
+                                SubtitleControlWidget(
+                                  key: _subtitleControlKey,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      
+                      // 顶部触发区指示条，只在AppBar隐藏时显示
+                      if (!_showAppBar)
+                        Positioned(
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          child: MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            onHover: (event) {
+                              // 立即显示AppBar
+                              setState(() {
+                                _showAppBar = true;
+                                // 启动隐藏定时器
+                                _startHideAppBarTimer();
+                              });
+                            },
+                            child: Container(
+                              height: 8,
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    Colors.grey.withOpacity(0.1),
+                                    Colors.transparent,
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      
+                      // 自定义覆盖式AppBar
+                      AnimatedPositioned(
+                        duration: const Duration(milliseconds: 200),
+                        top: _showAppBar ? 0 : -kToolbarHeight,
+                        left: 0,
+                        right: 0,
+                        height: kToolbarHeight,
+                        child: Material(
+                          color: Colors.black.withOpacity(0.6),
+                          elevation: 4,
+                          child: SafeArea(
+                            bottom: false,
+                            child: Row(
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                                  child: Text(
+                                    _appTitle,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                const Spacer(),
+                                // 设置按钮
+                                _SafeIconButton(
+                                  icon: const Icon(Icons.settings, color: Colors.white),
+                                  tooltip: '设置',
+                                  onPressed: () {
+                                    _navigateToConfigScreen(context);
+                                    // 操作完成后重新获取主焦点
+                                    _focusNode.requestFocus();
+                                  },
+                                ),
+                                // 选择视频按钮
+                                _SafeIconButton(
+                                  icon: const Icon(Icons.video_library, color: Colors.white),
+                                  tooltip: '选择视频',
+                                  onPressed: () async {
+                                    final videoService = Provider.of<VideoService>(context, listen: false);
+                                    final videoPath = await videoService.pickVideoFile();
+                                    if (videoPath != null) {
+                                      _currentVideoPath = videoPath;
+                                      _updateAppTitle(videoPath);
+                                      _showSnackBar('正在加载视频: ${path.basename(videoPath)}');
+                                      final success = await videoService.loadVideo(videoPath);
+                                      if (success) {
+                                        _showSnackBar('视频加载成功');
+                                        
+                                        // 加载该视频的生词本
+                                        final videoName = path.basename(videoPath);
+                                        final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+                                        vocabularyService.setCurrentVideo(videoName);
+                                        vocabularyService.loadVocabularyList(videoName);
+                                      }
+                                    }
+                                    // 操作完成后重新获取主焦点
+                                    _focusNode.requestFocus();
+                                  },
+                                ),
+                                // 选择字幕按钮
+                                _SafeIconButton(
+                                  icon: const Icon(Icons.subtitles, color: Colors.white),
+                                  tooltip: '选择字幕',
+                                  onPressed: () async {
+                                    final videoService = Provider.of<VideoService>(context, listen: false);
+                                    if (videoService.player == null) {
+                                      _showSnackBar('请先选择视频文件');
+                                      return;
+                                    }
+                                    
+                                    final subtitlePath = await videoService.pickSubtitleFile();
+                                    if (subtitlePath != null) {
+                                      _currentSubtitlePath = subtitlePath;
+                                      _showSnackBar('正在加载字幕: ${path.basename(subtitlePath)}');
+                                      final success = await videoService.loadSubtitle(subtitlePath);
+                                      if (success) {
+                                        _showSnackBar('字幕加载成功');
+                                      }
+                                    }
+                                    // 操作完成后重新获取主焦点
+                                    _focusNode.requestFocus();
+                                  },
+                                ),
+                                // 帮助按钮
+                                _SafeIconButton(
+                                  icon: const Icon(Icons.help_outline, color: Colors.white),
+                                  tooltip: '帮助',
+                                  onPressed: () {
+                                    _showHelpDialog(context);
+                                    // 操作完成后重新获取主焦点
+                                    _focusNode.requestFocus();
+                                  },
+                                ),
+                                // 保存进度按钮
+                                _SafeIconButton(
+                                  icon: const Icon(Icons.save, color: Colors.white),
+                                  tooltip: '保存进度',
+                                  onPressed: () {
+                                    _saveCurrentProgress();
+                                    _showSnackBar('已保存当前进度');
+                                    // 操作完成后重新获取主焦点
+                                    _focusNode.requestFocus();
+                                  },
+                                ),
+                                // 历史记录按钮
+                                _SafeIconButton(
+                                  icon: const Icon(Icons.history, color: Colors.white),
+                                  tooltip: '查看历史记录',
+                                  onPressed: () {
+                                    setState(() {
+                                      _showVocabulary = false;
+                                    });
+                                    _scaffoldKey.currentState?.openEndDrawer();
+                                    // 操作完成后重新获取主焦点
+                                    _focusNode.requestFocus();
+                                  },
+                                ),
+                                // 生词本按钮
+                                _SafeIconButton(
+                                  icon: const Icon(Icons.book, color: Colors.white),
+                                  tooltip: '查看生词本',
+                                  onPressed: () {
+                                    setState(() {
+                                      _showVocabulary = true;
+                                    });
+                                    _scaffoldKey.currentState?.openEndDrawer();
+                                    // 操作完成后重新获取主焦点
+                                    _focusNode.requestFocus();
+                                  },
+                                ),
+                                // YouTube按钮
+                                _SafeIconButton(
+                                  icon: const Icon(Icons.play_circle_outline, color: Colors.white),
+                                  tooltip: '打开YouTube视频',
+                                  onPressed: () {
+                                    _showYouTubeUrlDialog(context);
+                                    // 操作完成后重新获取主焦点
+                                    _focusNode.requestFocus();
+                                  },
+                                ),
+                                const SizedBox(width: 8),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
   
@@ -779,6 +800,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
   
+  // 鼠标移动处理
+  void _handleMouseMove(PointerEvent event) {
+    // 只有当鼠标在屏幕上方20像素区域内时才显示AppBar
+    if (event.position.dy < 20) {
+      // 显示AppBar
+      if (!_showAppBar) {
+        _showAppBarNow();
+      }
+      // 重置隐藏定时器
+      _startHideAppBarTimer();
+    }
+  }
+  
   // 显示AppBar
   void _showAppBarNow() {
     _hideAppBarTimer?.cancel();
@@ -797,16 +831,73 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
   
-  // 鼠标移动处理
-  void _handleMouseMove(PointerEvent event) {
-    // 只有当鼠标在屏幕上方20像素区域内时才显示AppBar
-    if (event.position.dy < 20) {
-      // 显示AppBar
-      if (!_showAppBar) {
-        _showAppBarNow();
+  // 导航到配置页面
+  void _navigateToConfigScreen(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (context) => const ConfigScreen()),
+    );
+  }
+  
+  // 显示YouTube URL输入对话框
+  void _showYouTubeUrlDialog(BuildContext context) {
+    final TextEditingController urlController = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('输入YouTube视频链接'),
+        content: TextField(
+          controller: urlController,
+          decoration: const InputDecoration(
+            hintText: 'https://www.youtube.com/watch?v=...',
+            labelText: 'YouTube URL',
+          ),
+          autofocus: true,
+          onSubmitted: (value) {
+            Navigator.of(context).pop();
+            _loadYouTubeVideo(value);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _loadYouTubeVideo(urlController.text);
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  // 加载YouTube视频
+  void _loadYouTubeVideo(String url) async {
+    if (url.isEmpty) return;
+    
+    final videoService = Provider.of<VideoService>(context, listen: false);
+    
+    if (videoService.isYouTubeLink(url)) {
+      // 显示加载消息
+      _showSnackBar('正在加载YouTube视频...');
+      
+      // 直接加载YouTube视频
+      final success = await videoService.loadVideo(url);
+      
+      if (success) {
+        _showSnackBar('YouTube视频加载成功');
+      } else {
+        _showSnackBar('YouTube视频加载失败: ${videoService.errorMessage ?? "未知错误"}');
       }
-      // 重置隐藏定时器
-      _startHideAppBarTimer();
+      
+      // 操作完成后重新获取主焦点
+      _focusNode.requestFocus();
+    } else {
+      _showSnackBar('无效的YouTube链接');
     }
   }
 }
@@ -862,24 +953,35 @@ class _SafeIconButton extends StatelessWidget {
   
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      // 完全禁用键盘焦点
-      canRequestFocus: false,
-      skipTraversal: true,
-      descendantsAreFocusable: false,
-      // 拦截所有键盘事件
-      onKeyEvent: (_, KeyEvent event) {
-        // 阻止所有键盘事件
-        return KeyEventResult.skipRemainingHandlers;
+    return IconButton(
+      icon: icon,
+      tooltip: tooltip,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 40),
+      focusColor: Colors.transparent,
+      focusNode: AlwaysDisabledFocusNode(), // 使用自定义FocusNode，永远不获取焦点
+      onPressed: () {
+        // 执行点击操作
+        onPressed();
+        
+        // 确保点击后将焦点返回给主界面
+        final homeScreenState = context.findAncestorStateOfType<_HomeScreenState>();
+        if (homeScreenState != null) {
+          Future.microtask(() {
+            FocusScope.of(context).requestFocus(homeScreenState._focusNode);
+            debugPrint('按钮点击后重新请求主界面焦点');
+          });
+        }
       },
-      child: IconButton(
-        icon: icon,
-        tooltip: tooltip,
-        padding: EdgeInsets.zero,
-        constraints: const BoxConstraints(minWidth: 40),
-        focusColor: Colors.transparent,
-        onPressed: onPressed,
-      ),
     );
   }
+}
+
+// 永远不获取焦点的FocusNode
+class AlwaysDisabledFocusNode extends FocusNode {
+  @override
+  bool get hasFocus => false;
+  
+  @override
+  bool canRequestFocus = false;
 } 

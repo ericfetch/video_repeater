@@ -29,10 +29,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   }
   
   void _initializeController() {
-    final player = Provider.of<VideoService>(context, listen: false).player;
-    if (player != null) {
+    final videoService = Provider.of<VideoService>(context, listen: false);
+    if (videoService.player != null) {
       setState(() {
-        _videoController = VideoController(player);
+        _videoController = VideoController(videoService.player!);
       });
     }
   }
@@ -74,21 +74,58 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     
     // 显示加载状态
     if (isLoading) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(),
-            const SizedBox(height: 16),
-            Text(
-              '正在加载视频...',
-              style: const TextStyle(color: Colors.white70),
-            ),
+            // 检查是否有下载进度
+            if (videoService.isYouTubeVideo && videoService.downloadStatus != null)
+              Column(
+                children: [
+                  // 下载状态文本
+                  Text(
+                    videoService.downloadStatus!,
+                    style: const TextStyle(color: Colors.white70),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  // 下载进度条
+                  if (videoService.downloadProgress > 0)
+                    SizedBox(
+                      width: 240,
+                      child: LinearProgressIndicator(
+                        value: videoService.downloadProgress,
+                        backgroundColor: Colors.grey[800],
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                      ),
+                    ),
+                  if (videoService.downloadProgress > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        '${(videoService.downloadProgress * 100).toStringAsFixed(1)}%',
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                    ),
+                ],
+              )
+            else
+              const Column(
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text(
+                    '正在加载视频...',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ],
+              ),
           ],
         ),
       );
     }
     
+    // 视频播放 (本地和YouTube视频都使用本地播放器)
     if (player == null || player.state.duration == Duration.zero) {
       return const Center(
         child: Text(
