@@ -566,6 +566,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     _focusNode.requestFocus();
                                   },
                                 ),
+                                // 清除缓存按钮 (测试用)
+                                _SafeIconButton(
+                                  icon: const Icon(Icons.delete_forever, color: Colors.red),
+                                  tooltip: '清除视频缓存(测试)',
+                                  onPressed: () {
+                                    final videoService = Provider.of<VideoService>(context, listen: false);
+                                    videoService.clearVideoCache();
+                                    _showSnackBar('已清除视频缓存，可以重新下载测试');
+                                    // 操作完成后重新获取主焦点
+                                    _focusNode.requestFocus();
+                                  },
+                                ),
                                 const SizedBox(width: 8),
                               ],
                             ),

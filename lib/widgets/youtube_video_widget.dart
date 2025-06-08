@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:pod_player/pod_player.dart';
 import 'package:provider/provider.dart';
+import 'package:media_kit_video/media_kit_video.dart';
+import 'package:media_kit/media_kit.dart';
 import '../services/video_service.dart';
-import '../services/youtube_service.dart';
 
 class YouTubeVideoWidget extends StatefulWidget {
   final VideoService? videoService;
@@ -19,9 +19,9 @@ class YouTubeVideoWidget extends StatefulWidget {
 }
 
 class _YouTubeVideoWidgetState extends State<YouTubeVideoWidget> {
-  PodPlayerController? _controller;
   bool _isLoading = true;
   String? _errorMessage;
+  VideoController? _videoController;
 
   @override
   void initState() {
@@ -57,27 +57,32 @@ class _YouTubeVideoWidgetState extends State<YouTubeVideoWidget> {
         return;
       }
       
-      // 直接使用视频服务的方法播放YouTube视频
-      final success = await videoService.playYouTubeWithPodPlayer('https://youtu.be/$videoId');
+      // 使用VideoService加载YouTube视频
+      bool success = await videoService.loadVideo('https://youtu.be/$videoId');
       
-      if (success) {
-        // 从YouTubeService获取控制器
-        final controller = videoService.youtubeService?.getPodPlayerController();
+      if (success && videoService.player != null) {
+        // 创建VideoController
+        final controller = VideoController(videoService.player!);
         
-        if (controller != null) {
-          if (mounted) {
-            setState(() {
-              _controller = controller;
-              _isLoading = false;
-            });
-          }
-        } else {
-          if (mounted) {
-            setState(() {
-              _isLoading = false;
-              _errorMessage = '无法获取播放器控制器';
-            });
-          }
+        // 禁用视频内置字幕
+        try {
+          // 等待播放器初始化完成
+          await Future.delayed(const Duration(milliseconds: 500));
+          await videoService.player!.setSubtitleTrack(SubtitleTrack.no());
+          debugPrint('已禁用视频区域内的字幕轨道');
+          
+          // 主动更新字幕显示
+          final position = videoService.player!.state.position;
+          debugPrint('YouTubeVideoWidget: 当前位置 ${position.inMilliseconds}ms');
+        } catch (e) {
+          debugPrint('禁用字幕轨道失败: $e');
+        }
+        
+        if (mounted) {
+          setState(() {
+            _videoController = controller;
+            _isLoading = false;
+          });
         }
       } else {
         if (mounted) {
@@ -99,46 +104,49 @@ class _YouTubeVideoWidgetState extends State<YouTubeVideoWidget> {
 
   @override
   void dispose() {
-    // 不在这里释放控制器，因为它由YouTubeService管理
+    // 不在这里释放控制器，因为它由VideoService管理
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_errorMessage != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.error_outline, color: Colors.red[300], size: 48),
-            const SizedBox(height: 16),
-            Text(
+    if (_videoController == null) {
+      if (_isLoading) {
+        return const Center(
+          child: CircularProgressIndicator(),
+        );
+      } else if (_errorMessage != null) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text(
               _errorMessage!,
               style: const TextStyle(color: Colors.white70),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _initializeController,
-              child: const Text('重试'),
-            ),
-          ],
+          ),
+        );
+      } else {
+        return const Center(
+          child: Text('正在初始化播放器...', style: TextStyle(color: Colors.white70)),
+        );
+      }
+    }
+    
+    // 使用MediaKit视频播放器，字幕将在应用的字幕控制区域显示
+    return Container(
+      color: Colors.black,
+      child: Video(
+        controller: _videoController!,
+        // 禁用视频内置字幕显示
+        subtitleViewConfiguration: const SubtitleViewConfiguration(
+          style: TextStyle(fontSize: 0, color: Colors.transparent),
+          visible: false, // 不显示字幕
+          padding: EdgeInsets.zero,
         ),
-      );
-    }
-    
-    if (_isLoading) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
-    }
-    
-    if (_controller == null) {
-      return const Center(
-        child: Text('未初始化播放器', style: TextStyle(color: Colors.white70)),
-      );
-    }
-    
-    return PodVideoPlayer(controller: _controller!);
+        // 基本视频配置
+        fit: BoxFit.contain,
+      ),
+    );
   }
 } 
