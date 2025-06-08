@@ -493,15 +493,8 @@ class VideoService extends ChangeNotifier {
       _clearPreviousResources();
       _youtubeVideoId = videoId;
       
-      // 初始化状态提示
-      _downloadStatus = '正在连接YouTube服务器...';
-      _downloadProgress = 0.0;
-      notifyListeners();
-      
-      // 添加短暂延迟，确保UI能够显示初始状态
-      await Future.delayed(const Duration(milliseconds: 300));
-      
       _downloadStatus = '正在获取视频信息...';
+      _downloadProgress = 0.0;
       notifyListeners();
       
       // 尝试最多3次下载视频
@@ -519,7 +512,6 @@ class VideoService extends ChangeNotifier {
         
         _downloadStatus = '正在准备下载视频...';
         notifyListeners();
-        await Future.delayed(const Duration(milliseconds: 300));
         
         // 下载视频和字幕
         downloadResult = await _youtubeService.downloadVideoAndSubtitles(
