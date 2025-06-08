@@ -12,6 +12,7 @@ import 'services/vocabulary_service.dart';
 import 'services/message_service.dart';
 import 'services/config_service.dart';
 import 'services/app_services.dart';
+import 'services/download_info_service.dart';
 import 'models/history_model.dart';
 import 'screens/home_screen.dart';
 import 'screens/windows_requirements_screen.dart';
@@ -98,12 +99,17 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => VocabularyService()),
         ChangeNotifierProvider(create: (_) => MessageService()),
         ChangeNotifierProvider(create: (_) => ConfigService()),
+        ChangeNotifierProvider(create: (_) => DownloadInfoService()),
       ],
       child: Consumer<ConfigService>(
         builder: (context, configService, child) {
           // 初始化VideoService和ConfigService的关联
           final videoService = Provider.of<VideoService>(context, listen: false);
           videoService.setConfigService(configService);
+          
+          // 初始化下载信息服务
+          final downloadInfoService = Provider.of<DownloadInfoService>(context, listen: false);
+          videoService.setDownloadInfoService(downloadInfoService);
           
           // 初始化全局服务引用
           AppServices.initServices(context);
@@ -258,28 +264,54 @@ class MessageOverlay extends StatelessWidget {
                   left: 0,
                   right: 0,
                   child: Center(
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 20),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.7),
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.2),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween<double>(begin: 0.0, end: 1.0),
+                      duration: const Duration(milliseconds: 300),
+                      builder: (context, value, child) {
+                        return Opacity(
+                          opacity: value,
+                          child: Transform.translate(
+                            offset: Offset(0, (1 - value) * -20),
+                            child: child,
                           ),
-                        ],
-                      ),
-                      child: Text(
-                        messageService.message!,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
+                        );
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 20),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: _getMessageColor(messageService.messageType).withOpacity(0.9),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.2),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
                         ),
-                        textAlign: TextAlign.center,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _getMessageIcon(messageService.messageType),
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text(
+                                messageService.message!,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -289,6 +321,36 @@ class MessageOverlay extends StatelessWidget {
         );
       },
     );
+  }
+  
+  // 根据消息类型返回颜色
+  Color _getMessageColor(MessageType type) {
+    switch (type) {
+      case MessageType.success:
+        return Colors.green.shade800;
+      case MessageType.error:
+        return Colors.red.shade800;
+      case MessageType.warning:
+        return Colors.orange.shade800;
+      case MessageType.info:
+      default:
+        return Colors.blue.shade800;
+    }
+  }
+  
+  // 根据消息类型返回图标
+  IconData _getMessageIcon(MessageType type) {
+    switch (type) {
+      case MessageType.success:
+        return Icons.check_circle_outline;
+      case MessageType.error:
+        return Icons.error_outline;
+      case MessageType.warning:
+        return Icons.warning_amber_rounded;
+      case MessageType.info:
+      default:
+        return Icons.info_outline;
+    }
   }
 }
 

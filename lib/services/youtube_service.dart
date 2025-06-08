@@ -132,10 +132,10 @@ class YouTubeService {
             
             if (videoExists) {
               return (videoPath, subtitleExists ? subtitlePath : null);
-            } else {
+      } else {
               // 如果文件不存在，从缓存记录中删除
               debugPrint('视频文件不存在，从缓存记录中删除');
-              _downloadCache.remove(videoId);
+        _downloadCache.remove(videoId);
               _saveCache();
             }
           } else {
@@ -266,9 +266,9 @@ class YouTubeService {
   String? _extractVideoId(String url) {
     // 已经是视频ID格式
     if (RegExp(r'^[a-zA-Z0-9_-]{11}$').hasMatch(url)) {
-      return url;
-    }
-    
+        return url;
+      }
+      
     // YouTube URL格式
     final patterns = [
       // youtu.be格式
@@ -288,8 +288,8 @@ class YouTubeService {
       }
     }
     
-    return null;
-  }
+        return null;
+      }
   
   // 从URL中提取视频ID (公开方法)
   String? extractVideoId(String url) {
@@ -555,7 +555,7 @@ class YouTubeService {
     } catch (e) {
       debugPrint('下载视频时发生错误: $e');
       onStatusUpdate('错误: ${e.toString()}');
-      return null;
+        return null;
     }
   }
   
@@ -677,7 +677,7 @@ class YouTubeService {
                   remainingTime = '${remainingSeconds.toInt()}秒';
                 } else if (remainingSeconds < 3600) {
                   remainingTime = '${(remainingSeconds / 60).toInt()}分${(remainingSeconds % 60).toInt()}秒';
-                } else {
+        } else {
                   remainingTime = '${(remainingSeconds / 3600).toInt()}小时${((remainingSeconds % 3600) / 60).toInt()}分';
                 }
               }
@@ -841,8 +841,8 @@ class YouTubeService {
           // 更新进度
           if (totalBytes > 0) {
             onProgress?.call(receivedBytes / totalBytes);
-          }
-        });
+            }
+          });
         
         // 使用缓冲区减少IO操作
         const bufferSize = 1024 * 1024; // 1MB缓冲区
@@ -1341,7 +1341,7 @@ class YouTubeService {
               
               debugPrint('获取的内容不是预期的字幕格式，尝试下一种格式');
             }
-          } catch (e) {
+    } catch (e) {
             debugPrint('获取$fmt格式字幕失败: $e');
           }
         }
@@ -1353,8 +1353,8 @@ class YouTubeService {
           
           if (captionLines.isEmpty) {
             debugPrint('字幕轨道中没有任何字幕行');
-            return null;
-          }
+      return null;
+    }
           
           // 将字幕转换为SRT格式
           final srtContent = StringBuffer();
@@ -1831,7 +1831,7 @@ class YouTubeService {
             if (lang == 'zh' || lang == 'zh-cn' || lang == 'zh-tw') {
               selectedTrack = track;
               debugPrint('选择中文字幕');
-              break;
+          break;
             }
           } catch (e) {
             debugPrint('处理轨道失败: $e');
@@ -2081,6 +2081,8 @@ class YouTubeService {
     String? preferredQuality,
   }) async {
     try {
+      // 提供更详细的初始状态
+      onStatusUpdate?.call('正在初始化YouTube下载...');
       // 支持多种URL格式
       final videoId = _extractVideoId(videoUrl);
       if (videoId == null) {
@@ -2129,8 +2131,8 @@ class YouTubeService {
       String? subtitleFile;
       try {
         subtitleFile = await downloadSubtitles(videoId, onStatusUpdate: onStatusUpdate);
-      } catch (e) {
-        debugPrint('下载字幕错误: $e');
+    } catch (e) {
+      debugPrint('下载字幕错误: $e');
         subtitleFile = null;
       }
       
@@ -2228,6 +2230,7 @@ class YouTubeService {
       
       // 下载视频和音频流
       statusCallback('准备下载视频: $title');
+      statusCallback('目标质量: $targetQuality');
       final streamResult = await downloadVideoToTemp(videoId, targetQuality, 
           progressCallback, statusCallback);
       

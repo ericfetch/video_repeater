@@ -11,6 +11,7 @@ import 'package:logging/logging.dart';
 import '../models/subtitle_model.dart';
 import 'config_service.dart';
 import 'youtube_service.dart';
+import 'download_info_service.dart';
 
 class VideoService extends ChangeNotifier {
   Player? _player;
@@ -28,6 +29,7 @@ class VideoService extends ChangeNotifier {
   SubtitleEntry? _loopingSubtitle; // 记录当前正在循环的字幕
   String? _currentVideoPath; // 当前视频路径
   String? _currentSubtitlePath; // 当前字幕路径
+  String _videoTitle = '视频复读机'; // 视频标题
   ConfigService? _configService; // 配置服务
   Timer? _debounceTimer;
   
@@ -39,15 +41,22 @@ class VideoService extends ChangeNotifier {
   dynamic _youtubeController; // 用于存储YouTube播放器控制器
   bool _isUsingWebView = false; // 是否使用WebView播放
   
+  // 下载信息服务
+  DownloadInfoService? _downloadInfoService;
+  
   // 播放位置监听
   StreamSubscription<Duration>? _positionSubscription;
   
   // 下载相关属性
   String? _downloadStatus; // 下载状态文本
   double _downloadProgress = 0.0; // 下载进度（0-1）
+  List<String> _downloadMessages = []; // 累加的下载信息列表
+  bool _showDownloadPanel = false; // 是否显示下载信息面板
   
   // 字幕时间偏移量（毫秒）
   int _subtitleTimeOffset = 0;
+  
+  int _lastKnownSubtitleCount = 0;
   
   Player? get player => _player;
   SubtitleData? get subtitleData => _subtitleData;
@@ -67,8 +76,17 @@ class VideoService extends ChangeNotifier {
   GlobalKey<dynamic>? get youtubePlayerKey => _youtubePlayerKey; // YouTube播放器Key
   String? get downloadStatus => _downloadStatus; // 下载状态
   double get downloadProgress => _downloadProgress; // 下载进度
+  List<String> get downloadMessages => _downloadMessages; // 获取下载信息列表
+  bool get showDownloadPanel => _showDownloadPanel; // 是否显示下载信息面板
   dynamic get youtubeController => _youtubeController; // YouTube播放器控制器
   bool get isUsingWebView => _isUsingWebView; // 是否使用WebView播放
+  String get videoTitle => _videoTitle; // 获取视频标题
+  
+  // 获取播放状态
+  bool get isPlaying => _player?.state.playing ?? false;
+  
+  // 获取当前循环字幕
+  SubtitleEntry? get loopingSubtitle => _loopingSubtitle;
   
   // 判断是否为YouTube链接
   bool isYouTubeLink(String url) {
@@ -93,6 +111,11 @@ class VideoService extends ChangeNotifier {
     
     // 应用初始配置
     _applyConfig();
+  }
+  
+  // 设置下载信息服务
+  void setDownloadInfoService(DownloadInfoService downloadInfoService) {
+    _downloadInfoService = downloadInfoService;
   }
   
   void _onConfigChanged() {
@@ -307,6 +330,11 @@ class VideoService extends ChangeNotifier {
       // 记录当前视频路径
       _currentVideoPath = videoPath;
       
+      // 从文件名更新视频标题
+      final fileName = path.basename(videoPath);
+      _videoTitle = fileName;
+      debugPrint('更新视频标题: $_videoTitle');
+      
       // 加载视频
       await _player!.open(Media(videoPath));
       debugPrint('成功加载视频: $videoPath');
@@ -322,6 +350,13 @@ class VideoService extends ChangeNotifier {
       }
       
       _isLoading = false;
+      
+      // 如果是从YouTube下载的视频，结束下载信息面板
+      if (_youtubeVideoId != null && _downloadInfoService != null) {
+        _downloadInfoService!.addMessage('视频加载成功，准备播放');
+        _downloadInfoService!.endDownload();
+      }
+      
       notifyListeners();
       return true;
     } catch (e) {
@@ -339,30 +374,147 @@ class VideoService extends ChangeNotifier {
       if (_configService == null) return false;
       
       final videoDir = path.dirname(videoPath);
-      final videoName = path.basenameWithoutExtension(videoPath);
+      final videoBasename = path.basename(videoPath);
+      
+      // 获取不带扩展名的文件名
+      String videoName = videoBasename;
+      final lastDotIndex = videoBasename.lastIndexOf('.');
+      if (lastDotIndex > 0) {
+        videoName = videoBasename.substring(0, lastDotIndex);
+      }
+      
+      // 特殊处理: 检查是否为YouTube下载的视频
+      bool isYoutubeDownload = false;
+      if (videoName.contains('_')) {
+        final parts = videoName.split('_');
+        if (parts.length >= 2 && parts[0].length == 11) {
+          // YouTube视频ID通常是11个字符
+          isYoutubeDownload = true;
+          debugPrint('检测到YouTube下载的视频，视频ID: ${parts[0]}');
+          
+          // 尝试提取原始视频名称
+          final originalName = parts.sublist(1).join('_');
+          debugPrint('原始视频名称可能为: $originalName');
+          
+          // 也尝试使用视频ID作为文件名
+          debugPrint('也将尝试使用视频ID作为文件名: ${parts[0]}');
+        }
+      }
+      
+      debugPrint('===== 开始自动匹配字幕 =====');
+      debugPrint('视频路径: $videoPath');
+      debugPrint('视频目录: $videoDir');
+      debugPrint('视频基本名称: $videoBasename');
+      debugPrint('视频名称(无扩展名): $videoName');
+      debugPrint('匹配模式: ${_configService!.subtitleMatchMode}');
+      debugPrint('后缀列表: ${_configService!.subtitleSuffixes.join(", ")}');
       
       // 尝试匹配字幕文件
       String? subtitlePath;
       
-      // 1. 首先尝试与视频同名的字幕文件
-      if (_configService!.subtitleMatchMode == 'same' || _configService!.subtitleMatchMode == 'both') {
-        final sameNamePath = path.join(videoDir, '$videoName.srt');
-        if (File(sameNamePath).existsSync()) {
-          subtitlePath = sameNamePath;
-          debugPrint('找到同名字幕文件: $subtitlePath');
+      // 支持的字幕格式
+      final subtitleExtensions = ['.srt', '.vtt', '.ass', '.ssa'];
+      
+      // 1. 首先尝试后缀匹配
+      if (_configService!.subtitleMatchMode == 'suffix' || _configService!.subtitleMatchMode == 'both') {
+        for (final suffix in _configService!.subtitleSuffixes) {
+          // 尝试不同的字幕扩展名
+          for (final ext in subtitleExtensions) {
+            final suffixPath = path.join(videoDir, '$videoName$suffix$ext');
+            if (File(suffixPath).existsSync()) {
+              subtitlePath = suffixPath;
+              debugPrint('找到后缀字幕文件: $subtitlePath (扩展名: $ext)');
+              break;
+            }
+          }
+          if (subtitlePath != null) break; // 如果找到了字幕文件，跳出循环
         }
       }
       
-      // 2. 如果没找到同名字幕，尝试后缀匹配
+      // 2. 如果没找到后缀字幕，尝试与视频同名的字幕文件
       if (subtitlePath == null && 
-          (_configService!.subtitleMatchMode == 'suffix' || _configService!.subtitleMatchMode == 'both')) {
-        for (final suffix in _configService!.subtitleSuffixes) {
-          final suffixPath = path.join(videoDir, '$videoName$suffix.srt');
-          if (File(suffixPath).existsSync()) {
-            subtitlePath = suffixPath;
-            debugPrint('找到后缀字幕文件: $subtitlePath');
-            break;
+          (_configService!.subtitleMatchMode == 'same' || _configService!.subtitleMatchMode == 'both')) {
+        debugPrint('开始查找同名字幕文件...');
+        
+        // 准备要尝试的文件名列表
+        List<String> filenamesToTry = [videoName];
+        
+        // 如果是YouTube下载的视频，添加额外的尝试
+        if (isYoutubeDownload && videoName.contains('_')) {
+          final parts = videoName.split('_');
+          if (parts.length >= 2) {
+            // 尝试使用视频ID
+            filenamesToTry.add(parts[0]);
+            
+            // 尝试使用原始视频名称
+            final originalName = parts.sublist(1).join('_');
+            filenamesToTry.add(originalName);
+            
+            // 尝试使用不带下划线的名称
+            filenamesToTry.add(videoName.replaceAll('_', ' '));
           }
+        }
+        
+        // 尝试每个可能的文件名
+        for (final filename in filenamesToTry) {
+          debugPrint('尝试文件名: $filename');
+          
+          // 尝试不同的字幕扩展名
+          for (final ext in subtitleExtensions) {
+            final sameNamePath = path.join(videoDir, '$filename$ext');
+            debugPrint('检查文件: $sameNamePath, 是否存在: ${File(sameNamePath).existsSync()}');
+            if (File(sameNamePath).existsSync()) {
+              subtitlePath = sameNamePath;
+              debugPrint('找到同名字幕文件: $subtitlePath (扩展名: $ext)');
+              break;
+            }
+          }
+          
+          if (subtitlePath != null) break;
+        }
+      }
+      
+      // 如果仍然没有找到字幕，尝试直接列出目录中的所有SRT文件
+      if (subtitlePath == null) {
+        debugPrint('未找到匹配的字幕文件，尝试列出目录中的所有字幕文件...');
+        try {
+          final dir = Directory(videoDir);
+          if (dir.existsSync()) {
+            final files = dir.listSync().where((f) => 
+              f is File && 
+              subtitleExtensions.any((ext) => f.path.toLowerCase().endsWith(ext))
+            ).toList();
+            
+            debugPrint('目录中的字幕文件数量: ${files.length}');
+            for (var file in files) {
+              debugPrint('  - ${file.path}');
+            }
+            
+            // 如果只有一个字幕文件，直接使用它
+            if (files.length == 1) {
+              subtitlePath = files.first.path;
+              debugPrint('目录中只有一个字幕文件，直接使用: $subtitlePath');
+            }
+            // 如果有多个字幕文件，尝试查找与视频名称最相似的
+            else if (files.length > 1) {
+              debugPrint('尝试查找与视频名称最相似的字幕文件...');
+              
+              // 简单的相似度匹配：检查文件名中是否包含视频名称的一部分
+              for (var file in files) {
+                final fileName = path.basenameWithoutExtension(file.path).toLowerCase();
+                final videoNameLower = videoName.toLowerCase();
+                
+                // 检查字幕文件名是否包含视频名称的前几个字符
+                if (videoNameLower.length > 3 && fileName.contains(videoNameLower.substring(0, 4))) {
+                  subtitlePath = file.path;
+                  debugPrint('找到可能匹配的字幕文件: $subtitlePath');
+                  break;
+                }
+              }
+            }
+          }
+        } catch (e) {
+          debugPrint('列出目录文件时出错: $e');
         }
       }
       
@@ -386,6 +538,8 @@ class VideoService extends ChangeNotifier {
   // 加载字幕文件
   Future<bool> loadSubtitle(String path) async {
     try {
+      debugPrint('开始加载字幕文件: $path');
+      
       final subtitleFile = File(path);
       if (!subtitleFile.existsSync()) {
         _errorMessage = '字幕文件不存在';
@@ -394,7 +548,7 @@ class VideoService extends ChangeNotifier {
       }
       
       final content = await subtitleFile.readAsString();
-      debugPrint('字幕文件内容长度: ${content.length}');
+      debugPrint('字幕文件内容长度: ${content.length} 字节');
       
       // 保存当前字幕路径
       _currentSubtitlePath = path;
@@ -409,16 +563,38 @@ class VideoService extends ChangeNotifier {
         }
       }
       
-      // 解析SRT格式字幕
+      // 根据文件扩展名选择解析方法
+      final fileExt = path.toLowerCase().endsWith('.srt') ? 'srt' :
+                      path.toLowerCase().endsWith('.vtt') ? 'vtt' :
+                      path.toLowerCase().endsWith('.ass') || path.toLowerCase().endsWith('.ssa') ? 'ass' :
+                      'unknown';
+                      
+      debugPrint('字幕文件格式: $fileExt');
+      
+      // 目前只支持SRT格式，其他格式需要转换或特殊处理
+      if (fileExt != 'srt') {
+        debugPrint('警告: 目前只完全支持SRT格式，其他格式可能解析不正确');
+      }
+      
+      // 先清空之前的字幕数据
+      _subtitleData = null;
+      _currentSubtitle = null;
+      _loopingSubtitle = null;
+      
+      // 解析字幕内容
       final entries = <SubtitleEntry>[];
       final lines = content.split('\n');
+      
+      debugPrint('字幕文件总行数: ${lines.length}');
       
       int index = 0;
       int entryIndex = 0;
       Duration? startTime;
       Duration? endTime;
       String text = '';
+      int processedEntries = 0;
       
+      // 使用更健壮的解析逻辑
       while (index < lines.length) {
         final line = lines[index].trim();
         
@@ -439,7 +615,16 @@ class VideoService extends ChangeNotifier {
               text: text.trim(),
             ));
             entryIndex++;
+            processedEntries++;
+            
+            // 每处理50个条目打印一次进度
+            if (processedEntries % 50 == 0) {
+              debugPrint('已处理 $processedEntries 条字幕');
+            }
+            
             text = '';
+            startTime = null;
+            endTime = null;
           }
           
           index++;
@@ -467,6 +652,7 @@ class VideoService extends ChangeNotifier {
             }
           }
         } else {
+          // 不是序号行，可能是格式错误，跳过
           index++;
         }
       }
@@ -479,10 +665,31 @@ class VideoService extends ChangeNotifier {
           end: endTime,
           text: text.trim(),
         ));
+        processedEntries++;
       }
       
+      debugPrint('字幕解析完成，共处理 $processedEntries 条字幕');
+      
+      // 检查是否有字幕被解析出来
+      if (entries.isEmpty) {
+        _errorMessage = '未能解析出任何字幕';
+        debugPrint(_errorMessage);
+        notifyListeners();
+        return false;
+      }
+      
+      // 检查是否恰好有48条字幕（可能是截断问题）
+      if (entries.length == 48) {
+        debugPrint('警告: 解析出恰好48条字幕，可能存在截断问题。请检查字幕文件完整性。');
+      }
+      
+      // 创建新的字幕数据对象
       _subtitleData = SubtitleData(entries: entries);
+      _lastKnownSubtitleCount = entries.length; // 记录字幕数量
       debugPrint('成功加载字幕，共 ${entries.length} 条');
+      
+      // 打印字幕数据的详细信息
+      _debugPrintSubtitleInfo();
       
       notifyListeners();
       return true;
@@ -492,6 +699,43 @@ class VideoService extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+  
+  // 调试方法：打印字幕数据信息
+  void _debugPrintSubtitleInfo() {
+    if (_subtitleData == null) {
+      debugPrint('字幕数据为空');
+      return;
+    }
+    
+    final entries = _subtitleData!.entries;
+    debugPrint('========== 字幕数据信息 ==========');
+    debugPrint('总字幕条数: ${entries.length}');
+    
+    if (entries.isNotEmpty) {
+      debugPrint('第一条字幕: #${entries.first.index + 1}, 时间: ${entries.first.start.inSeconds}s - ${entries.first.end.inSeconds}s');
+      debugPrint('最后一条字幕: #${entries.last.index + 1}, 时间: ${entries.last.start.inSeconds}s - ${entries.last.end.inSeconds}s');
+      
+      // 检查是否有48条字幕的限制
+      if (entries.length == 48) {
+        debugPrint('警告: 字幕条数恰好为48，可能存在限制问题');
+      }
+    }
+    
+    // 检查字幕索引是否连续
+    bool hasGap = false;
+    for (int i = 0; i < entries.length - 1; i++) {
+      if (entries[i].index + 1 != entries[i + 1].index) {
+        hasGap = true;
+        debugPrint('警告: 字幕索引不连续，在 #${entries[i].index + 1} 和 #${entries[i + 1].index + 1} 之间有间隙');
+      }
+    }
+    
+    if (!hasGap) {
+      debugPrint('字幕索引连续，无间隙');
+    }
+    
+    debugPrint('================================');
   }
   
   // 解析SRT时间格式 (00:00:00,000 -> Duration)
@@ -526,6 +770,12 @@ class VideoService extends ChangeNotifier {
       _isYouTubeVideo = true;
       _isUsingWebView = false;
       
+      // 初始化下载信息面板
+      if (_downloadInfoService != null) {
+        _downloadInfoService!.startDownload();
+        _downloadInfoService!.addMessage('正在解析YouTube视频ID: $videoId');
+      }
+      
       _downloadStatus = '正在获取视频信息...';
       _downloadProgress = 0.0;
       notifyListeners();
@@ -539,6 +789,12 @@ class VideoService extends ChangeNotifier {
       while (downloadResult == null && retryCount <= maxRetries) {
         if (retryCount > 0) {
           _downloadStatus = '重试下载 (${retryCount}/${maxRetries})...';
+          
+          // 更新下载信息面板
+          if (_downloadInfoService != null) {
+            _downloadInfoService!.addMessage('重试下载 (${retryCount}/${maxRetries})...');
+          }
+          
           notifyListeners();
           await Future.delayed(const Duration(seconds: 1));
         }
@@ -551,10 +807,22 @@ class VideoService extends ChangeNotifier {
           videoId, 
           onProgress: (progress) {
             _downloadProgress = progress;
+            
+            // 更新下载信息面板的进度
+            if (_downloadInfoService != null) {
+              _downloadInfoService!.setProgress(progress);
+            }
+            
             notifyListeners();
           },
           onStatusUpdate: (status) {
             _downloadStatus = status;
+            
+            // 更新下载信息面板的消息
+            if (_downloadInfoService != null && status.isNotEmpty) {
+              _downloadInfoService!.addMessage(status);
+            }
+            
             notifyListeners();
           }
         );
@@ -565,6 +833,12 @@ class VideoService extends ChangeNotifier {
       if (downloadResult == null) {
         _errorMessage = '无法下载视频，请重试';
         _isLoading = false;
+        
+        // 更新下载信息面板
+        if (_downloadInfoService != null) {
+          _downloadInfoService!.downloadError('无法下载视频，请重试');
+        }
+        
         notifyListeners();
         return false;
       }
@@ -573,6 +847,16 @@ class VideoService extends ChangeNotifier {
       final (videoPath, subtitlePath) = downloadResult;
       
       _downloadStatus = '下载完成，正在加载视频...';
+      
+      // 更新下载信息面板
+      if (_downloadInfoService != null) {
+        _downloadInfoService!.addMessage('下载完成，正在加载视频...');
+        _downloadInfoService!.addMessage('视频路径: $videoPath');
+        if (subtitlePath != null) {
+          _downloadInfoService!.addMessage('字幕路径: $subtitlePath');
+        }
+      }
+      
       notifyListeners();
       
       // 切换到本地视频加载逻辑
@@ -633,6 +917,12 @@ class VideoService extends ChangeNotifier {
   Future<void> _tryDownloadSubtitles(String videoId) async {
     try {
       _downloadStatus = '正在尝试获取字幕...';
+      
+      // 更新下载信息面板
+      if (_downloadInfoService != null) {
+        _downloadInfoService!.addMessage('正在尝试获取字幕...');
+      }
+      
       notifyListeners();
       
       // 获取字幕内容
@@ -687,7 +977,13 @@ class VideoService extends ChangeNotifier {
   
   // 清理之前的资源
   void _clearPreviousResources() {
-    _subtitleData = null;
+    debugPrint('清理之前的资源');
+    
+    // 清理字幕相关数据
+    if (_subtitleData != null) {
+      debugPrint('清理字幕数据，原有条数: ${_subtitleData!.entries.length}');
+      _subtitleData = null;
+    }
     _currentSubtitle = null;
     _loopingSubtitle = null;
     _isLooping = false;
@@ -696,10 +992,20 @@ class VideoService extends ChangeNotifier {
     _duration = Duration.zero;
     _isYouTubeVideo = false;
     _youtubeVideoId = null;
+    _lastKnownSubtitleCount = 0;
+    _subtitleTimeOffset = 0;
     
     // 取消定时器
     _loopTimer?.cancel();
+    _loopTimer = null;
     _debounceTimer?.cancel();
+    _debounceTimer = null;
+    
+    // 重置路径
+    _currentVideoPath = null;
+    _currentSubtitlePath = null;
+    
+    debugPrint('资源清理完成');
   }
   
   // 切换播放/暂停状态
@@ -741,6 +1047,7 @@ class VideoService extends ChangeNotifier {
   // 跳转到下一个字幕
   void nextSubtitle() {
     if (_subtitleData == null || _subtitleData!.entries.isEmpty || _player == null) {
+      debugPrint('nextSubtitle - 没有字幕数据或播放器');
       return;
     }
     
@@ -753,12 +1060,15 @@ class VideoService extends ChangeNotifier {
         milliseconds: max(0, currentPosition.inMilliseconds - _subtitleTimeOffset)
       );
       
+      debugPrint('nextSubtitle - 当前位置: ${currentPosition.inMilliseconds}ms, 调整后位置: ${adjustedPosition.inMilliseconds}ms');
+      
       // 找到当前字幕（如果在字幕内）
       SubtitleEntry? currentEntry;
       for (final entry in _subtitleData!.entries) {
         if (entry.start.inMilliseconds <= adjustedPosition.inMilliseconds && 
             entry.end.inMilliseconds >= adjustedPosition.inMilliseconds) {
           currentEntry = entry;
+          debugPrint('当前在字幕内: #${entry.index + 1} "${entry.text.substring(0, min(20, entry.text.length))}..."');
           break;
         }
       }
@@ -768,12 +1078,18 @@ class VideoService extends ChangeNotifier {
       
       if (currentEntry != null) {
         // 如果当前在字幕内，找到紧邻的下一个字幕
-        int currentIndex = currentEntry.index;
-        if (currentIndex < _subtitleData!.entries.length - 1) {
+        final currentIndex = currentEntry.index;
+        
+        // 安全检查：确保索引在有效范围内
+        if (currentIndex >= 0 && currentIndex < _subtitleData!.entries.length - 1) {
           nextEntry = _subtitleData!.entries[currentIndex + 1];
+          debugPrint('找到下一个字幕: #${nextEntry.index + 1}');
+        } else {
+          debugPrint('当前已是最后一个字幕，无法跳转到下一个');
         }
       } else {
         // 如果当前不在任何字幕内，找到最近的下一个字幕
+        debugPrint('当前不在任何字幕内，查找下一个最近的字幕');
         int minDistance = -1;
         for (final entry in _subtitleData!.entries) {
           if (entry.start.inMilliseconds > adjustedPosition.inMilliseconds) {
@@ -784,14 +1100,25 @@ class VideoService extends ChangeNotifier {
             }
           }
         }
+        
+        if (nextEntry != null) {
+          debugPrint('找到最近的下一个字幕: #${nextEntry.index + 1}, 距离: ${minDistance}ms');
+        }
       }
       
       // 如果找到下一个字幕，就跳转到它的开始位置
       if (nextEntry != null) {
         // 跳转时需要考虑时间偏移
         final seekPosition = Duration(milliseconds: nextEntry.start.inMilliseconds + _subtitleTimeOffset);
-        seek(seekPosition);
-        debugPrint('跳转到下一个字幕: #${nextEntry.index + 1}, 位置: ${seekPosition.inMilliseconds}ms');
+        debugPrint('准备跳转到下一个字幕: #${nextEntry.index + 1}, 位置: ${seekPosition.inMilliseconds}ms');
+        
+        // 直接更新当前字幕，避免循环判断问题
+        _currentSubtitle = nextEntry;
+        notifyListeners();
+        
+        // 执行跳转
+        _player!.seek(seekPosition);
+        debugPrint('已跳转到下一个字幕: #${nextEntry.index + 1}, 位置: ${seekPosition.inMilliseconds}ms');
       } else {
         debugPrint('没有下一个字幕');
       }
@@ -803,6 +1130,7 @@ class VideoService extends ChangeNotifier {
   // 跳转到上一个字幕
   void previousSubtitle() {
     if (_subtitleData == null || _subtitleData!.entries.isEmpty || _player == null) {
+      debugPrint('previousSubtitle - 没有字幕数据或播放器');
       return;
     }
     
@@ -815,12 +1143,15 @@ class VideoService extends ChangeNotifier {
         milliseconds: max(0, currentPosition.inMilliseconds - _subtitleTimeOffset)
       );
       
+      debugPrint('previousSubtitle - 当前位置: ${currentPosition.inMilliseconds}ms, 调整后位置: ${adjustedPosition.inMilliseconds}ms');
+      
       // 找到当前字幕（如果在字幕内）
       SubtitleEntry? currentEntry;
       for (final entry in _subtitleData!.entries) {
         if (entry.start.inMilliseconds <= adjustedPosition.inMilliseconds && 
             entry.end.inMilliseconds >= adjustedPosition.inMilliseconds) {
           currentEntry = entry;
+          debugPrint('当前在字幕内: #${entry.index + 1}');
           break;
         }
       }
@@ -835,10 +1166,16 @@ class VideoService extends ChangeNotifier {
         
         if (nearStart && currentEntry.index > 0) {
           // 如果靠近开始且不是第一句，跳到上一句
-          prevEntry = _subtitleData!.entries[currentEntry.index - 1];
+          // 安全检查：确保索引在有效范围内
+          final prevIndex = currentEntry.index - 1;
+          if (prevIndex >= 0 && prevIndex < _subtitleData!.entries.length) {
+            prevEntry = _subtitleData!.entries[prevIndex];
+            debugPrint('跳转到上一个字幕: #${prevEntry.index + 1}');
+          }
         } else if (!nearStart) {
           // 如果不靠近开始，跳到当前字幕开始
           prevEntry = currentEntry;
+          debugPrint('跳转到当前字幕开始位置: #${prevEntry.index + 1}');
         } else {
           // 如果靠近开始且是第一句，不做任何操作
           debugPrint('已经是第一个字幕');
@@ -846,6 +1183,7 @@ class VideoService extends ChangeNotifier {
         }
       } else {
         // 如果当前不在任何字幕内，找到最近的上一个字幕
+        debugPrint('当前不在任何字幕内，查找最近的上一个字幕');
         int minDistance = -1;
         for (int i = _subtitleData!.entries.length - 1; i >= 0; i--) {
           final entry = _subtitleData!.entries[i];
@@ -857,16 +1195,27 @@ class VideoService extends ChangeNotifier {
             }
           }
         }
+        
+        if (prevEntry != null) {
+          debugPrint('找到最近的上一个字幕: #${prevEntry.index + 1}, 距离: ${minDistance}ms');
+        }
       }
       
       // 如果找到上一个字幕，就跳转到它的开始位置
       if (prevEntry != null) {
         // 跳转时需要考虑时间偏移
         final seekPosition = Duration(milliseconds: prevEntry.start.inMilliseconds + _subtitleTimeOffset);
-        seek(seekPosition);
-        debugPrint('跳转到上一个字幕: #${prevEntry.index + 1}, 位置: ${seekPosition.inMilliseconds}ms');
+        debugPrint('准备跳转到字幕: #${prevEntry.index + 1}, 位置: ${seekPosition.inMilliseconds}ms');
+        
+        // 直接更新当前字幕，避免循环判断问题
+        _currentSubtitle = prevEntry;
+        notifyListeners();
+        
+        // 执行跳转
+        _player!.seek(seekPosition);
+        debugPrint('已跳转到字幕: #${prevEntry.index + 1}, 位置: ${seekPosition.inMilliseconds}ms');
       } else {
-        debugPrint('没有上一个字幕');
+        debugPrint('没有找到可跳转的字幕');
       }
     } catch (e) {
       debugPrint('跳转到上一个字幕错误: $e');
@@ -887,104 +1236,44 @@ class VideoService extends ChangeNotifier {
     }
   }
   
-  // 切换循环播放状态
+  // 切换循环播放状态（别名方法，与toggleLooping功能相同）
   void toggleLoop() {
-    if (_subtitleData == null || _subtitleData!.entries.isEmpty) {
-      debugPrint('无法切换循环状态：无字幕数据');
-      return;
-    }
+    toggleLooping();
+  }
+  
+  // 切换循环播放状态
+  void toggleLooping() {
+    _isLooping = !_isLooping;
     
-    try {
-      _isLooping = !_isLooping;
-      
-      if (_isLooping) {
-        // 开始循环
-        _loopCount = 0;
+    if (_isLooping) {
+      // 如果当前有字幕，设置为循环字幕
+      if (_currentSubtitle != null) {
+        _loopingSubtitle = _currentSubtitle;
+        debugPrint('开始循环播放字幕: "${_loopingSubtitle!.text}" (${_loopingSubtitle!.start.inSeconds}s - ${_loopingSubtitle!.end.inSeconds}s)');
         
-        // 获取当前位置
-        Duration currentPosition;
-        
-        if (_isYouTubeVideo) {
-          // YouTube视频使用_currentPosition
-          currentPosition = _currentPosition;
-        } else if (_player != null) {
-          // 本地视频使用player.state.position
-          currentPosition = _player!.state.position;
-        } else {
-          debugPrint('无法开始循环：没有播放器或当前位置');
-          _isLooping = false;
-          notifyListeners();
-          return;
+        // 如果不在当前字幕范围内，跳转到字幕开始位置
+        final adjustedPosition = Duration(milliseconds: max(0, _currentPosition.inMilliseconds - _subtitleTimeOffset));
+        if (_loopingSubtitle!.start > adjustedPosition || _loopingSubtitle!.end < adjustedPosition) {
+          // 调整回字幕开始时间
+          seek(_loopingSubtitle!.start + Duration(milliseconds: _subtitleTimeOffset));
         }
         
-        // 获取当前字幕（考虑时间偏移）
-        final currentSubtitle = _getAdjustedSubtitleAtTime(currentPosition);
-        
-        if (currentSubtitle != null) {
-          // 使用当前字幕作为循环字幕
-          _loopingSubtitle = currentSubtitle;
-          debugPrint('开始循环播放当前字幕: #${currentSubtitle.index + 1}, 内容: ${currentSubtitle.text}');
-          
-          // 跳转到循环字幕的开始位置（考虑时间偏移）
-          final seekPosition = Duration(milliseconds: currentSubtitle.start.inMilliseconds + _subtitleTimeOffset);
-          
-          if (_isYouTubeVideo && _youtubePlayerKey?.currentState != null) {
-            // YouTube视频使用WebView控制器跳转
-            _youtubePlayerKey!.currentState!.seekTo(seekPosition);
-          } else if (_player != null) {
-            // 本地视频使用Player跳转
-            seek(seekPosition);
-          }
-        } else {
-          // 如果没有当前字幕，查找最近的字幕
-          SubtitleEntry? nearestEntry;
-          int minDistance = -1;
-          
-          for (final entry in _subtitleData!.entries) {
-            // 考虑时间偏移计算调整后的开始时间
-            final adjustedStart = Duration(milliseconds: entry.start.inMilliseconds + _subtitleTimeOffset);
-            final distance = (adjustedStart.inMilliseconds - currentPosition.inMilliseconds).abs();
-            
-            if (minDistance < 0 || distance < minDistance) {
-              minDistance = distance;
-              nearestEntry = entry;
-            }
-          }
-          
-          if (nearestEntry != null) {
-            _loopingSubtitle = nearestEntry;
-            debugPrint('开始循环播放最近的字幕: #${nearestEntry.index + 1}, 内容: ${nearestEntry.text}');
-            
-            // 跳转到循环字幕的开始位置（考虑时间偏移）
-            final seekPosition = Duration(milliseconds: nearestEntry.start.inMilliseconds + _subtitleTimeOffset);
-            
-            if (_isYouTubeVideo && _youtubePlayerKey?.currentState != null) {
-              // YouTube视频使用WebView控制器跳转
-              _youtubePlayerKey!.currentState!.seekTo(seekPosition);
-            } else if (_player != null) {
-              // 本地视频使用Player跳转
-              seek(seekPosition);
-            }
-          } else {
-            debugPrint('无法开始循环，找不到合适的字幕');
-            _isLooping = false;
-          }
-        }
-      } else {
-        // 停止循环
-        _loopingSubtitle = null;
-        _loopCount = 0;
-        debugPrint('停止循环播放');
+        // 开始循环计数
+        _loopCount = 1;
       }
-      
-      notifyListeners();
-    } catch (e) {
-      debugPrint('切换循环状态错误: $e');
-      _isLooping = false;
+    } else {
+      // 停止循环
+      debugPrint('停止循环播放');
       _loopingSubtitle = null;
       _loopCount = 0;
-      notifyListeners();
+      _isWaitingForLoop = false;
     }
+    
+    // 取消已有循环定时器
+    _loopTimer?.cancel();
+    _loopTimer = null;
+    
+    notifyListeners();
   }
   
   // 选择视频文件
@@ -1034,13 +1323,24 @@ class VideoService extends ChangeNotifier {
         // 执行跳转
         _player!.seek(safePosition);
         
+        // 立即更新当前位置
+        _currentPosition = safePosition;
+        
         // 强制更新当前字幕状态
         if (_subtitleData != null && _subtitleData!.entries.isNotEmpty) {
-          Future.delayed(const Duration(milliseconds: 100), () {
+          // 直接使用跳转位置更新字幕，而不是等待播放器位置更新
+          _updateCurrentSubtitle(safePosition);
+          debugPrint('跳转后立即更新字幕状态，位置: ${safePosition.inMilliseconds}ms');
+          
+          // 再次延迟更新，确保播放器位置已经更新
+          Future.delayed(const Duration(milliseconds: 200), () {
             if (_player != null) {
               final actualPosition = _player!.state.position;
-              _updateCurrentSubtitle(actualPosition);
-              debugPrint('跳转后强制更新字幕状态，位置: ${actualPosition.inMilliseconds}ms');
+              if ((actualPosition.inMilliseconds - safePosition.inMilliseconds).abs() > 100) {
+                // 如果实际位置与目标位置相差超过100毫秒，再次更新
+                _updateCurrentSubtitle(actualPosition);
+                debugPrint('跳转后再次更新字幕状态，实际位置: ${actualPosition.inMilliseconds}ms');
+              }
             }
           });
         }
@@ -1081,20 +1381,28 @@ class VideoService extends ChangeNotifier {
   
   // 获取指定时间点的字幕（考虑时间偏移）
   SubtitleEntry? _getAdjustedSubtitleAtTime(Duration position) {
-    if (_subtitleData == null || _subtitleData!.entries.isEmpty) {
-      return null;
-    }
+    if (_subtitleData == null || _subtitleData!.entries.isEmpty) return null;
     
-    // 考虑字幕时间偏移，确保不为负值
+    // 应用时间偏移，确保不为负值
     final adjustedPosition = Duration(
       milliseconds: max(0, position.inMilliseconds - _subtitleTimeOffset)
     );
+    final positionMs = adjustedPosition.inMilliseconds;
+    
+    // 调试信息
+    if (_subtitleTimeOffset != 0 && (position.inMilliseconds / 1000).round() % 10 == 0) {
+      debugPrint('字幕时间偏移: 原始位置=${position.inSeconds}秒, 调整后=${adjustedPosition.inSeconds}秒, 偏移=${_subtitleTimeOffset/1000}秒');
+    }
+    
+    // 检查字幕数据完整性
+    if (_subtitleData!.entries.length < _lastKnownSubtitleCount) {
+      debugPrint('警告: 字幕数据可能被截断! 当前条数: ${_subtitleData!.entries.length}, 之前条数: $_lastKnownSubtitleCount');
+    }
     
     // 查找当前字幕
-    for (final entry in _subtitleData!.entries) {
-      if (entry.start.inMilliseconds <= adjustedPosition.inMilliseconds && 
-          entry.end.inMilliseconds >= adjustedPosition.inMilliseconds) {
-        return entry;
+    for (final sub in _subtitleData!.entries) {
+      if (positionMs >= sub.start.inMilliseconds && positionMs <= sub.end.inMilliseconds) {
+        return sub;
       }
     }
     
@@ -1195,16 +1503,24 @@ class VideoService extends ChangeNotifier {
     
     // 取消所有定时器
     _loopTimer?.cancel();
+    _loopTimer = null;
     _debounceTimer?.cancel();
+    _debounceTimer = null;
     
     // 取消播放位置监听
     _positionSubscription?.cancel();
+    _positionSubscription = null;
     
     // 移除配置服务监听器
-    _configService?.removeListener(_onConfigChanged);
+    if (_configService != null) {
+      _configService!.removeListener(_onConfigChanged);
+    }
     
     // 清理字幕数据
-    _subtitleData = null;
+    if (_subtitleData != null) {
+      debugPrint('清理字幕数据，原有条数: ${_subtitleData!.entries.length}');
+      _subtitleData = null;
+    }
     _currentSubtitle = null;
     _loopingSubtitle = null;
     _currentVideoPath = null;
@@ -1221,7 +1537,40 @@ class VideoService extends ChangeNotifier {
       }
     }
     
-    super.dispose();
+    // 重置其他状态
+    _isLoading = false;
+    _errorMessage = null;
+    _isLooping = false;
+    _loopCount = 0;
+    _lastPosition = null;
+    _currentPosition = Duration.zero;
+    _duration = Duration.zero;
+    _isYouTubeVideo = false;
+    _youtubeVideoId = null;
+    _subtitleTimeOffset = 0;
+    _lastKnownSubtitleCount = 0;
+    
+    // 通知监听器状态已重置
+    notifyListeners();
+    
+    // 重新初始化播放器，准备下一次使用
+    _initPlayer();
+  }
+  
+  // 重新初始化视频服务
+  Future<void> reinitialize() async {
+    debugPrint('重新初始化VideoService');
+    
+    // 先清理现有资源
+    _clearPreviousResources();
+    
+    // 如果播放器已销毁，重新创建
+    if (_player == null) {
+      _initPlayer();
+      await Future.delayed(const Duration(milliseconds: 300)); // 等待初始化完成
+    }
+    
+    notifyListeners();
   }
   
   // 从SRT格式的文本解析字幕
@@ -1463,5 +1812,63 @@ class VideoService extends ChangeNotifier {
         seek(seekPosition);
       }
     }
+  }
+  
+  // 播放视频
+  void play() {
+    if (_player != null) {
+      _player!.play();
+      debugPrint('播放视频');
+      notifyListeners();
+    }
+  }
+  
+  // 暂停视频
+  void pause() {
+    if (_player != null) {
+      _player!.pause();
+      debugPrint('暂停视频');
+      notifyListeners();
+    }
+  }
+  
+  // 重置视频服务状态，但不调用dispose
+  void reset() {
+    debugPrint('重置VideoService状态');
+    
+    // 取消所有定时器
+    _loopTimer?.cancel();
+    _loopTimer = null;
+    _debounceTimer?.cancel();
+    _debounceTimer = null;
+    
+    // 清理字幕相关数据
+    if (_subtitleData != null) {
+      debugPrint('清理字幕数据，原有条数: ${_subtitleData!.entries.length}');
+      _subtitleData = null;
+    }
+    _currentSubtitle = null;
+    _loopingSubtitle = null;
+    _isLooping = false;
+    _loopCount = 0;
+    
+    // 暂停当前播放
+    if (_player != null && _player!.state.playing) {
+      _player!.pause();
+    }
+    
+    // 重置状态
+    _currentPosition = Duration.zero;
+    _duration = Duration.zero;
+    _isYouTubeVideo = false;
+    _youtubeVideoId = null;
+    _lastKnownSubtitleCount = 0;
+    _subtitleTimeOffset = 0;
+    _currentVideoPath = null;
+    _currentSubtitlePath = null;
+    _isLoading = false;
+    _errorMessage = null;
+    
+    notifyListeners();
   }
 } 

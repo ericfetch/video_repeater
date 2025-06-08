@@ -42,7 +42,6 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
   bool _isDarkMode = false;
   bool _isBoldFont = false;
   bool _autoMatchSubtitle = true;
-  bool _showYoutubeDownloadProgress = true;
   String _subtitleMatchMode = 'same';
   
   // 确保只初始化一次
@@ -75,7 +74,6 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
       _isDarkMode = configService.darkMode;
       _isBoldFont = configService.subtitleFontWeight == FontWeight.bold;
       _autoMatchSubtitle = configService.autoMatchSubtitle;
-      _showYoutubeDownloadProgress = configService.youtubeShowDownloadProgress;
       _subtitleMatchMode = configService.subtitleMatchMode;
       _initialized = true;
     });
@@ -148,7 +146,6 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
     configService.updateSubtitleFontWeight(_isBoldFont);
     configService.updateAutoMatchSubtitle(_autoMatchSubtitle);
     configService.updateSubtitleMatchMode(_subtitleMatchMode);
-    configService.updateYoutubeShowDownloadProgress(_showYoutubeDownloadProgress);
     configService.updateDarkMode(_isDarkMode);
     
     ScaffoldMessenger.of(context).showSnackBar(
@@ -483,19 +480,7 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
                 ),
               ),
               
-              // 显示下载进度
-              StatefulBuilder(
-                builder: (context, setState) => SwitchListTile(
-                  title: const Text('显示下载进度'),
-                  subtitle: const Text('下载YouTube视频时显示进度条'),
-                  value: _showYoutubeDownloadProgress,
-                  onChanged: (value) {
-                    setState(() {
-                      _showYoutubeDownloadProgress = value;
-                    });
-                  },
-                ),
-              ),
+
               
               const SizedBox(height: 24),
               

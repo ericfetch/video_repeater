@@ -42,6 +42,9 @@ class HistoryService extends ChangeNotifier {
   
   // 添加历史记录
   Future<void> addHistory(VideoHistory history) async {
+    // 保存当前历史记录的引用
+    final oldCurrentHistory = _currentHistory;
+    
     // 检查是否已存在相同视频路径的记录
     final existingIndex = _history.indexWhere(
       (item) => item.videoPath == history.videoPath && item.subtitlePath == history.subtitlePath
@@ -61,6 +64,13 @@ class HistoryService extends ChangeNotifier {
     }
     
     await saveHistory();
+    
+    // 如果当前历史记录被错误地更新，恢复它
+    if (_currentHistory != oldCurrentHistory && oldCurrentHistory != null) {
+      debugPrint('检测到添加历史记录时currentHistory被错误更新，恢复原值');
+      _currentHistory = oldCurrentHistory;
+    }
+    
     notifyListeners();
   }
   
@@ -92,9 +102,24 @@ class HistoryService extends ChangeNotifier {
     final stateJson = json.encode(lastState.toJson());
     
     await prefs.setString(_lastPlayStateKey, stateJson);
+    
+    // 保存当前历史记录的引用
+    final oldCurrentHistory = _currentHistory;
+    
+    // 更新最后播放状态，但不触发通知
     _lastPlayState = lastState;
-    notifyListeners();
+    
+    // 如果当前历史记录被错误地更新，恢复它
+    if (_currentHistory != oldCurrentHistory && oldCurrentHistory != null) {
+      debugPrint('检测到currentHistory被错误更新，恢复原值');
+      _currentHistory = oldCurrentHistory;
+    }
+    
     debugPrint('已保存最后播放状态: ${lastState.videoName}');
+    debugPrint('当前历史记录: ${_currentHistory?.videoName ?? "无"}');
+    
+    // 仅通知最后播放状态的变化
+    notifyListeners();
   }
   
   // 加载最后播放状态

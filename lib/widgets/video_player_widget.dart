@@ -52,22 +52,49 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     // 显示错误信息
     if (errorMessage != null) {
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.error_outline, color: Colors.red[300], size: 48),
-            const SizedBox(height: 16),
-            Text(
-              errorMessage,
-              style: const TextStyle(color: Colors.white70),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: videoService.clearError,
-              child: const Text('确定'),
-            ),
-          ],
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.3),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.error_outline, color: Colors.red[300], size: 64),
+              const SizedBox(height: 16),
+              Text(
+                errorMessage,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: videoService.clearError,
+                icon: const Icon(Icons.refresh),
+                label: const Text('重试'),
+                style: ElevatedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  backgroundColor: Colors.blue,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -75,52 +102,46 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     // 显示加载状态
     if (isLoading) {
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 检查是否有下载进度
-            if (videoService.isYouTubeVideo && videoService.downloadStatus != null)
-              Column(
-                children: [
-                  // 下载状态文本
-                  Text(
-                    videoService.downloadStatus!,
-                    style: const TextStyle(color: Colors.white70),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 16),
-                  // 下载进度条
-                  if (videoService.downloadProgress > 0)
-                    SizedBox(
-                      width: 240,
-                      child: LinearProgressIndicator(
-                        value: videoService.downloadProgress,
-                        backgroundColor: Colors.grey[800],
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.3),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+
+                Column(
+                  children: [
+                    const SizedBox(
+                      width: 48,
+                      height: 48,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 4,
                         valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
                       ),
                     ),
-                  if (videoService.downloadProgress > 0)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        '${(videoService.downloadProgress * 100).toStringAsFixed(1)}%',
-                        style: const TextStyle(color: Colors.white70),
+                    const SizedBox(height: 20),
+                    const Text(
+                      '正在加载视频...',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
-                ],
-              )
-            else
-              const Column(
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text(
-                    '正在加载视频...',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ],
-              ),
-          ],
+                  ],
+                ),
+            ],
+          ),
         ),
       );
     }

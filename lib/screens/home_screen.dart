@@ -12,6 +12,7 @@ import '../widgets/video_player_widget.dart';
 import '../widgets/subtitle_control_widget.dart';
 import '../widgets/history_list_widget.dart';
 import '../widgets/vocabulary_list_widget.dart';
+import '../widgets/download_info_panel.dart';
 import '../models/history_model.dart';
 import '../screens/config_screen.dart';
 import '../screens/youtube_video_screen.dart';
@@ -26,7 +27,6 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String? _currentVideoPath;
   String? _currentSubtitlePath;
-  String _appTitle = '视频复读机';
   final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   
@@ -163,12 +163,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final historyService = Provider.of<HistoryService>(context, listen: false);
     final currentHistory = historyService.currentHistory;
     
-    // 如果从历史记录加载了视频，更新标题
+    debugPrint('历史记录服务状态变化: currentHistory=${currentHistory?.videoName}');
+    debugPrint('当前视频路径: $_currentVideoPath');
+    
+    // 如果从历史记录加载了视频，更新路径但不更新标题
     if (currentHistory != null && 
         _currentVideoPath != currentHistory.videoPath) {
+      debugPrint('更新视频路径: ${currentHistory.videoName}');
       _currentVideoPath = currentHistory.videoPath;
       _currentSubtitlePath = currentHistory.subtitlePath;
-      _updateAppTitle(currentHistory.videoPath);
       
       // 同时加载该视频的生词本
       if (_currentVideoPath != null) {
@@ -177,6 +180,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         vocabularyService.setCurrentVideo(videoName);
         vocabularyService.loadVocabularyList(videoName);
       }
+    } else if (currentHistory != null) {
+      debugPrint('历史记录变化但视频路径未变: ${currentHistory.videoName}');
     }
   }
   
@@ -210,13 +215,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     messageService.showMessage(message);
   }
   
-  // 更新应用标题
-  void _updateAppTitle(String videoPath) {
-    setState(() {
-      _appTitle = path.basename(videoPath);
-    });
-  }
-  
   // 提取播放状态切换逻辑到单独方法
   void _togglePlayState(VideoService videoService) {
     try {
@@ -236,6 +234,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (e) {
       debugPrint('切换播放状态错误: $e');
     }
+  }
+  
+  // 更新视频标题 - 只在视频加载成功后调用此方法
+  void updateVideoTitle(String videoPath) {
+    // 不再需要此方法，视频标题由VideoService管理
   }
   
   @override
@@ -281,7 +284,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 return KeyEventResult.handled;
               } else if (event.logicalKey == LogicalKeyboardKey.keyR) {
                 debugPrint('R键按下，切换循环模式');
-                videoService.toggleLoop();
+                videoService.toggleLooping();
                 _showSnackBar(videoService.isLooping ? '开始循环' : '停止循环');
                 return KeyEventResult.handled;
               } else if (event.logicalKey == LogicalKeyboardKey.keyS) {
@@ -291,6 +294,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   subtitleControlWidget.toggleSubtitleBlur();
                   _showSnackBar(subtitleControlWidget.isSubtitleBlurred ? '字幕已模糊' : '字幕已显示');
                 }
+                return KeyEventResult.handled;
+              } else if (event.logicalKey == LogicalKeyboardKey.keyL) {
+                final videoService = Provider.of<VideoService>(context, listen: false);
+                videoService.toggleLooping();
+                
+                final messageService = Provider.of<MessageService>(context, listen: false);
+                messageService.showMessage(
+                  videoService.isLooping ? '开始循环' : '停止循环'
+                );
                 return KeyEventResult.handled;
               }
             }
@@ -423,6 +435,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           ),
                         ),
                       
+                      // 下载信息面板
+                      const DownloadInfoPanel(),
+                      
                       // 自定义覆盖式AppBar
                       AnimatedPositioned(
                         duration: const Duration(milliseconds: 200),
@@ -431,155 +446,171 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         right: 0,
                         height: kToolbarHeight,
                         child: Material(
-                          color: Colors.black.withOpacity(0.6),
+                          color: Colors.transparent,
                           elevation: 4,
-                          child: SafeArea(
-                            bottom: false,
-                            child: Row(
-                              children: [
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                                  child: Text(
-                                    _appTitle,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.black.withOpacity(0.9),
+                                  Colors.black.withOpacity(0.7),
+                                ],
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.3),
+                                  blurRadius: 5,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: SafeArea(
+                              bottom: false,
+                              child: Row(
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                                    child: Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.video_library,
+                                          color: Colors.blue,
+                                          size: 24,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          videoService.videoTitle,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 18,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                ),
-                                const Spacer(),
-                                // 设置按钮
-                                _SafeIconButton(
-                                  icon: const Icon(Icons.settings, color: Colors.white),
-                                  tooltip: '设置',
-                                  onPressed: () {
-                                    _navigateToConfigScreen(context);
-                                    // 操作完成后重新获取主焦点
-                                    _focusNode.requestFocus();
-                                  },
-                                ),
-                                // 选择视频按钮
-                                _SafeIconButton(
-                                  icon: const Icon(Icons.video_library, color: Colors.white),
-                                  tooltip: '选择视频',
-                                  onPressed: () async {
-                                    final videoService = Provider.of<VideoService>(context, listen: false);
-                                    final videoPath = await videoService.pickVideoFile();
-                                    if (videoPath != null) {
-                                      _currentVideoPath = videoPath;
-                                      _updateAppTitle(videoPath);
-                                      _showSnackBar('正在加载视频: ${path.basename(videoPath)}');
-                                      final success = await videoService.loadVideo(videoPath);
-                                      if (success) {
-                                        _showSnackBar('视频加载成功');
-                                        
-                                        // 加载该视频的生词本
-                                        final videoName = path.basename(videoPath);
-                                        final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
-                                        vocabularyService.setCurrentVideo(videoName);
-                                        vocabularyService.loadVocabularyList(videoName);
+                                  const Spacer(),
+                                  // 设置按钮
+                                  _SafeIconButton(
+                                    icon: const Icon(Icons.settings, color: Colors.white),
+                                    tooltip: '设置',
+                                    onPressed: () {
+                                      _navigateToConfigScreen(context);
+                                      // 操作完成后重新获取主焦点
+                                      _focusNode.requestFocus();
+                                    },
+                                  ),
+                                  // 选择视频按钮
+                                  _SafeIconButton(
+                                    icon: const Icon(Icons.video_library, color: Colors.white),
+                                    tooltip: '选择视频',
+                                    onPressed: () async {
+                                      final videoService = Provider.of<VideoService>(context, listen: false);
+                                      final videoPath = await videoService.pickVideoFile();
+                                      if (videoPath != null) {
+                                        _currentVideoPath = videoPath;
+                                        _showSnackBar('正在加载视频: ${path.basename(videoPath)}');
+                                        final success = await videoService.loadVideo(videoPath);
+                                        if (success) {
+                                          _showSnackBar('视频加载成功');
+                                          
+                                          // 加载该视频的生词本
+                                          final videoName = path.basename(videoPath);
+                                          final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+                                          vocabularyService.setCurrentVideo(videoName);
+                                          vocabularyService.loadVocabularyList(videoName);
+                                        }
                                       }
-                                    }
-                                    // 操作完成后重新获取主焦点
-                                    _focusNode.requestFocus();
-                                  },
-                                ),
-                                // 选择字幕按钮
-                                _SafeIconButton(
-                                  icon: const Icon(Icons.subtitles, color: Colors.white),
-                                  tooltip: '选择字幕',
-                                  onPressed: () async {
-                                    final videoService = Provider.of<VideoService>(context, listen: false);
-                                    if (videoService.player == null) {
-                                      _showSnackBar('请先选择视频文件');
-                                      return;
-                                    }
-                                    
-                                    final subtitlePath = await videoService.pickSubtitleFile();
-                                    if (subtitlePath != null) {
-                                      _currentSubtitlePath = subtitlePath;
-                                      _showSnackBar('正在加载字幕: ${path.basename(subtitlePath)}');
-                                      final success = await videoService.loadSubtitle(subtitlePath);
-                                      if (success) {
-                                        _showSnackBar('字幕加载成功');
+                                      // 操作完成后重新获取主焦点
+                                      _focusNode.requestFocus();
+                                    },
+                                  ),
+                                  // 选择字幕按钮
+                                  _SafeIconButton(
+                                    icon: const Icon(Icons.subtitles, color: Colors.white),
+                                    tooltip: '选择字幕',
+                                    onPressed: () async {
+                                      final videoService = Provider.of<VideoService>(context, listen: false);
+                                      if (videoService.player == null) {
+                                        _showSnackBar('请先选择视频文件');
+                                        return;
                                       }
-                                    }
-                                    // 操作完成后重新获取主焦点
-                                    _focusNode.requestFocus();
-                                  },
-                                ),
-                                // 帮助按钮
-                                _SafeIconButton(
-                                  icon: const Icon(Icons.help_outline, color: Colors.white),
-                                  tooltip: '帮助',
-                                  onPressed: () {
-                                    _showHelpDialog(context);
-                                    // 操作完成后重新获取主焦点
-                                    _focusNode.requestFocus();
-                                  },
-                                ),
-                                // 保存进度按钮
-                                _SafeIconButton(
-                                  icon: const Icon(Icons.save, color: Colors.white),
-                                  tooltip: '保存进度',
-                                  onPressed: () {
-                                    _saveCurrentProgress();
-                                    _showSnackBar('已保存当前进度');
-                                    // 操作完成后重新获取主焦点
-                                    _focusNode.requestFocus();
-                                  },
-                                ),
-                                // 历史记录按钮
-                                _SafeIconButton(
-                                  icon: const Icon(Icons.history, color: Colors.white),
-                                  tooltip: '查看历史记录',
-                                  onPressed: () {
-                                    setState(() {
-                                      _showVocabulary = false;
-                                    });
-                                    _scaffoldKey.currentState?.openEndDrawer();
-                                    // 操作完成后重新获取主焦点
-                                    _focusNode.requestFocus();
-                                  },
-                                ),
-                                // 生词本按钮
-                                _SafeIconButton(
-                                  icon: const Icon(Icons.book, color: Colors.white),
-                                  tooltip: '查看生词本',
-                                  onPressed: () {
-                                    setState(() {
-                                      _showVocabulary = true;
-                                    });
-                                    _scaffoldKey.currentState?.openEndDrawer();
-                                    // 操作完成后重新获取主焦点
-                                    _focusNode.requestFocus();
-                                  },
-                                ),
-                                // YouTube按钮
-                                _SafeIconButton(
-                                  icon: const Icon(Icons.play_circle_outline, color: Colors.white),
-                                  tooltip: '打开YouTube视频',
-                                  onPressed: () {
-                                    _showYouTubeUrlDialog(context);
-                                    // 操作完成后重新获取主焦点
-                                    _focusNode.requestFocus();
-                                  },
-                                ),
-                                // 清除缓存按钮 (测试用)
-                                _SafeIconButton(
-                                  icon: const Icon(Icons.delete_forever, color: Colors.red),
-                                  tooltip: '清除视频缓存(测试)',
-                                  onPressed: () {
-                                    final videoService = Provider.of<VideoService>(context, listen: false);
-                                    videoService.clearVideoCache();
-                                    _showSnackBar('已清除视频缓存，可以重新下载测试');
-                                    // 操作完成后重新获取主焦点
-                                    _focusNode.requestFocus();
-                                  },
-                                ),
-                                const SizedBox(width: 8),
-                              ],
+                                      
+                                      final subtitlePath = await videoService.pickSubtitleFile();
+                                      if (subtitlePath != null) {
+                                        _currentSubtitlePath = subtitlePath;
+                                        _showSnackBar('正在加载字幕: ${path.basename(subtitlePath)}');
+                                        final success = await videoService.loadSubtitle(subtitlePath);
+                                        if (success) {
+                                          _showSnackBar('字幕加载成功');
+                                        }
+                                      }
+                                      // 操作完成后重新获取主焦点
+                                      _focusNode.requestFocus();
+                                    },
+                                  ),
+                                  // 帮助按钮
+                                  _SafeIconButton(
+                                    icon: const Icon(Icons.help_outline, color: Colors.white),
+                                    tooltip: '帮助',
+                                    onPressed: () {
+                                      _showHelpDialog(context);
+                                      // 操作完成后重新获取主焦点
+                                      _focusNode.requestFocus();
+                                    },
+                                  ),
+                                  // 保存进度按钮
+                                  _SafeIconButton(
+                                    icon: const Icon(Icons.save, color: Colors.white),
+                                    tooltip: '保存进度',
+                                    onPressed: () {
+                                      _saveCurrentProgress();
+                                      _showSnackBar('已保存当前进度');
+                                      // 操作完成后重新获取主焦点
+                                      _focusNode.requestFocus();
+                                    },
+                                  ),
+                                  // 历史记录按钮
+                                  _SafeIconButton(
+                                    icon: const Icon(Icons.history, color: Colors.white),
+                                    tooltip: '查看历史记录',
+                                    onPressed: () {
+                                      setState(() {
+                                        _showVocabulary = false;
+                                      });
+                                      _scaffoldKey.currentState?.openEndDrawer();
+                                      // 操作完成后重新获取主焦点
+                                      _focusNode.requestFocus();
+                                    },
+                                  ),
+                                  // 生词本按钮
+                                  _SafeIconButton(
+                                    icon: const Icon(Icons.book, color: Colors.white),
+                                    tooltip: '查看生词本',
+                                    onPressed: () {
+                                      setState(() {
+                                        _showVocabulary = true;
+                                      });
+                                      _scaffoldKey.currentState?.openEndDrawer();
+                                      // 操作完成后重新获取主焦点
+                                      _focusNode.requestFocus();
+                                    },
+                                  ),
+                                  // YouTube按钮
+                                  _SafeIconButton(
+                                    icon: const Icon(Icons.play_circle_outline, color: Colors.white),
+                                    tooltip: '打开YouTube视频',
+                                    onPressed: () {
+                                      _showYouTubeUrlDialog(context);
+                                      // 操作完成后重新获取主焦点
+                                      _focusNode.requestFocus();
+                                    },
+                                  ),
+                                  const SizedBox(width: 8),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -665,6 +696,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final historyService = Provider.of<HistoryService>(context, listen: false);
     
     if (_currentVideoPath != null && videoService.player != null) {
+      // 记录保存前的视频路径和标题
+      final originalVideoPath = _currentVideoPath;
+      
       final videoName = path.basename(_currentVideoPath!);
       final position = videoService.currentPosition;
       final subtitlePath = _currentSubtitlePath ?? '';
@@ -679,8 +713,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         subtitleTimeOffset: subtitleTimeOffset,
       );
       
+      // 保存状态
       historyService.saveLastPlayState(lastState);
       debugPrint('保存当前播放状态: $videoName - ${position.inSeconds}秒, 字幕偏移: ${subtitleTimeOffset/1000}秒');
+      
+      // 检查保存后视频路径是否被错误更改
+      if (_currentVideoPath != originalVideoPath) {
+        debugPrint('检测到视频路径被错误更改，恢复原值');
+        _currentVideoPath = originalVideoPath;
+      }
     }
   }
   
@@ -704,9 +745,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           return;
         }
         
-        // 更新当前路径
+        // 更新当前路径，但不更新标题
         _currentVideoPath = lastState.videoPath;
-        _updateAppTitle(lastState.videoPath);
         
         // 加载视频
         final videoService = Provider.of<VideoService>(context, listen: false);
