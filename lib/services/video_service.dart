@@ -230,8 +230,17 @@ class VideoService extends ChangeNotifier {
       
       // 判断是否为YouTube链接
       if (isYouTubeLink(videoPath)) {
+        // 提取YouTube视频ID
+        final videoId = await _youtubeService.extractVideoId(videoPath);
+        if (videoId == null) {
+          _errorMessage = '无效的YouTube链接或ID';
+          _isLoading = false;
+          notifyListeners();
+          return false;
+        }
+        
         _isYouTubeVideo = true;
-        return await _loadYouTubeVideo(videoPath);
+        return await _loadYouTubeVideo(videoId);
       } else {
         _isYouTubeVideo = false;
         return await _loadLocalVideo(videoPath);
@@ -478,63 +487,30 @@ class VideoService extends ChangeNotifier {
   }
   
   // 加载YouTube视频
-  Future<bool> _loadYouTubeVideo(String url) async {
+  Future<bool> _loadYouTubeVideo(String videoId, {bool showProgress = true}) async {
     try {
       _isLoading = true;
-      _errorMessage = null;
-      _downloadStatus = '正在准备处理YouTube视频...';
+      _clearPreviousResources();
+      _youtubeVideoId = videoId;
+      
+      // 初始化状态提示
+      _downloadStatus = '正在连接YouTube服务器...';
       _downloadProgress = 0.0;
       notifyListeners();
       
-      debugPrint('准备加载YouTube视频: $url');
+      // 添加短暂延迟，确保UI能够显示初始状态
+      await Future.delayed(const Duration(milliseconds: 300));
       
-      // 提取视频ID
-      _downloadStatus = '正在分析视频链接...';
-      notifyListeners();
-      final videoId = await _youtubeService.extractVideoId(url);
-      if (videoId == null) {
-        _errorMessage = '无效的YouTube链接或ID';
-        _isLoading = false;
-        notifyListeners();
-        return false;
-      }
-      
-      _youtubeVideoId = videoId;
       _downloadStatus = '正在获取视频信息...';
       notifyListeners();
       
-      // 获取视频信息
-      final videoInfo = await _youtubeService.getVideoInfo(videoId);
-      if (videoInfo == null) {
-        _errorMessage = '无法获取视频信息';
-        _isLoading = false;
-        notifyListeners();
-        return false;
-      }
-      
-      debugPrint('成功获取YouTube视频信息: ${videoInfo.title}');
-      _downloadStatus = '获取视频信息成功: ${videoInfo.title}';
-      notifyListeners();
-      
-      // 设置YouTubeService的配置服务
-      if (_configService != null) {
-        _youtubeService.setConfigService(_configService!);
-      }
-      
-      // 是否显示下载进度
-      bool showProgress = _configService?.youtubeShowDownloadProgress ?? true;
-      
-      // 更新下载状态UI
-      void updateDownloadUI() {
-        notifyListeners();
-      }
-      
       // 尝试最多3次下载视频
-      String? videoPath;
       int retryCount = 0;
       const maxRetries = 2;
       
-      while (videoPath == null && retryCount <= maxRetries) {
+      (String, String?)? downloadResult;
+      
+      while (downloadResult == null && retryCount <= maxRetries) {
         if (retryCount > 0) {
           _downloadStatus = '重试下载 (${retryCount}/${maxRetries})...';
           notifyListeners();
@@ -543,20 +519,21 @@ class VideoService extends ChangeNotifier {
         
         _downloadStatus = '正在准备下载视频...';
         notifyListeners();
+        await Future.delayed(const Duration(milliseconds: 300));
         
-        // 下载视频到本地或临时文件
-        videoPath = await _youtubeService.downloadVideoToTemp(
+        // 下载视频和字幕
+        downloadResult = await _youtubeService.downloadVideoAndSubtitles(
           videoId, 
           onProgress: (progress) {
             if (showProgress) {
               _downloadProgress = progress;
-              updateDownloadUI();
+              notifyListeners();
             }
           },
           onStatusUpdate: (status) {
             if (showProgress) {
               _downloadStatus = status;
-              updateDownloadUI();
+              notifyListeners();
             }
           }
         );
@@ -564,39 +541,63 @@ class VideoService extends ChangeNotifier {
         retryCount++;
       }
       
-      if (videoPath == null) {
+      if (downloadResult == null) {
         _errorMessage = '无法下载视频，请重试';
         _isLoading = false;
         notifyListeners();
         return false;
       }
       
+      // 解包下载结果
+      final (videoPath, subtitlePath) = downloadResult;
+      
       _downloadStatus = '正在加载视频播放器...';
       notifyListeners();
       
-      // 尝试下载字幕
+      // 处理字幕
       SubtitleData? subtitleData;
-      try {
-        _downloadStatus = '正在尝试获取字幕...';
-        notifyListeners();
-        subtitleData = await _youtubeService.downloadSubtitles(videoId);
-        if (subtitleData != null) {
-          debugPrint('成功下载YouTube字幕: ${subtitleData.entries.length}条');
-          _downloadStatus = '成功获取${subtitleData.entries.length}条字幕';
+      
+      if (subtitlePath != null) {
+        try {
+          _downloadStatus = '正在加载字幕...';
           notifyListeners();
-        } else {
-          debugPrint('下载YouTube字幕失败: 未找到字幕');
-          debugPrint('无法加载YouTube字幕');
-          debugPrint('注意: 该YouTube视频没有可用字幕');
-          _downloadStatus = '该视频没有可用字幕';
+          
+          // 从SRT文件加载字幕
+          final subtitleContent = await File(subtitlePath).readAsString();
+          subtitleData = parseSrtSubtitle(subtitleContent);
+          
+          if (subtitleData != null) {
+            debugPrint('成功加载字幕文件: ${subtitleData.entries.length}条');
+            _downloadStatus = '成功加载${subtitleData.entries.length}条字幕';
+          } else {
+            debugPrint('解析字幕文件失败');
+            _downloadStatus = '字幕格式不正确';
+          }
+          notifyListeners();
+        } catch (e) {
+          debugPrint('加载字幕文件失败: $e');
+          _downloadStatus = '加载字幕失败: $e';
           notifyListeners();
         }
-      } catch (e) {
-        debugPrint('下载YouTube字幕失败: $e');
-        debugPrint('无法加载YouTube字幕');
-        debugPrint('注意: 该YouTube视频没有可用字幕');
-        _downloadStatus = '无法获取字幕: $e';
-        notifyListeners();
+      } else {
+        // 如果没有下载到SRT字幕，尝试直接API获取
+        try {
+          _downloadStatus = '正在尝试获取字幕...';
+          notifyListeners();
+          subtitleData = await _youtubeService.downloadSubtitles(videoId);
+          if (subtitleData != null) {
+            debugPrint('成功下载YouTube字幕: ${subtitleData.entries.length}条');
+            _downloadStatus = '成功获取${subtitleData.entries.length}条字幕';
+          } else {
+            debugPrint('下载YouTube字幕失败: 未找到字幕');
+            _downloadStatus = '该视频没有可用字幕';
+          }
+          notifyListeners();
+        } catch (e) {
+          debugPrint('下载YouTube字幕失败: $e');
+          _downloadStatus = '无法获取字幕: $e';
+          notifyListeners();
+        }
       }
       
       // 标记为YouTube视频，以便后续处理
@@ -618,7 +619,7 @@ class VideoService extends ChangeNotifier {
       
       // 保存当前视频路径
       _currentVideoPath = 'watch?v=$videoId';
-      _currentSubtitlePath = null;
+      _currentSubtitlePath = subtitlePath;
       
       // 重置字幕时间偏移
       _subtitleTimeOffset = 0;
@@ -1192,5 +1193,104 @@ class VideoService extends ChangeNotifier {
     }
     
     super.dispose();
+  }
+  
+  // 从SRT格式的文本解析字幕
+  SubtitleData? parseSrtSubtitle(String content) {
+    try {
+      final lines = content.split('\n');
+      final List<SubtitleEntry> entries = [];
+      
+      int index = 0;
+      int entryIndex = 0;
+      String text = '';
+      Duration start = Duration.zero;
+      Duration end = Duration.zero;
+      
+      while (index < lines.length) {
+        final line = lines[index].trim();
+        index++;
+        
+        if (line.isEmpty) {
+          // 空行表示一个字幕项结束
+          if (text.isNotEmpty) {
+            entries.add(SubtitleEntry(
+              index: entryIndex,
+              start: start,
+              end: end,
+              text: text.trim(),
+            ));
+            text = '';
+            entryIndex++;
+          }
+          continue;
+        }
+        
+        // 尝试解析编号行（可以忽略）
+        if (int.tryParse(line) != null) {
+          continue;
+        }
+        
+        // 尝试解析时间行
+        if (line.contains('-->')) {
+          final parts = line.split('-->');
+          if (parts.length == 2) {
+            start = _parseSrtTime(parts[0].trim());
+            end = _parseSrtTime(parts[1].trim());
+            continue;
+          }
+        }
+        
+        // 其他行都是字幕文本
+        if (text.isNotEmpty) {
+          text += '\n';
+        }
+        text += line;
+      }
+      
+      // 添加最后一个字幕（如果有）
+      if (text.isNotEmpty) {
+        entries.add(SubtitleEntry(
+          index: entryIndex,
+          start: start,
+          end: end,
+          text: text.trim(),
+        ));
+      }
+      
+      return SubtitleData(entries: entries);
+    } catch (e) {
+      debugPrint('解析SRT字幕出错: $e');
+      return null;
+    }
+  }
+  
+  // 解析SRT时间格式为Duration
+  Duration _parseSrtTime(String timeStr) {
+    try {
+      // 格式: 00:00:00,000
+      final parts = timeStr.split(':');
+      if (parts.length == 3) {
+        final hours = int.parse(parts[0]);
+        final minutes = int.parse(parts[1]);
+        
+        final secondParts = parts[2].split(',');
+        if (secondParts.length == 2) {
+          final seconds = int.parse(secondParts[0]);
+          final milliseconds = int.parse(secondParts[1]);
+          
+          return Duration(
+            hours: hours,
+            minutes: minutes,
+            seconds: seconds,
+            milliseconds: milliseconds,
+          );
+        }
+      }
+      return Duration.zero;
+    } catch (e) {
+      debugPrint('解析SRT时间格式出错: $e');
+      return Duration.zero;
+    }
   }
 } 

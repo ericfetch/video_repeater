@@ -26,6 +26,7 @@ class ConfigService extends ChangeNotifier {
     // YouTube设置
     'youtubeDownloadPath': '', // YouTube视频下载路径，空表示使用临时目录
     'youtubeShowDownloadProgress': true, // 是否显示下载进度
+    'youtubeVideoQuality': '480p', // YouTube视频质量
     
     // 界面设置
     'darkMode': false,
@@ -74,6 +75,9 @@ class ConfigService extends ChangeNotifier {
   
   // 获取是否显示YouTube下载进度
   bool get youtubeShowDownloadProgress => _config['youtubeShowDownloadProgress'] ?? true;
+  
+  // 获取YouTube视频质量
+  String get youtubeVideoQuality => _config['youtubeVideoQuality'] ?? '480p';
   
   // 获取暗黑模式
   bool get darkMode => _config['darkMode'];
@@ -194,6 +198,13 @@ class ConfigService extends ChangeNotifier {
   // 更新是否显示YouTube下载进度
   Future<void> updateYoutubeShowDownloadProgress(bool show) async {
     _config['youtubeShowDownloadProgress'] = show;
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新YouTube视频质量
+  Future<void> setYouTubeVideoQuality(String quality) async {
+    _config['youtubeVideoQuality'] = quality;
     await saveConfig();
     notifyListeners();
   }
