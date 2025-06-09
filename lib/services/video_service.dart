@@ -260,6 +260,12 @@ class VideoService extends ChangeNotifier {
       // 清理之前的资源
       _clearPreviousResources();
       
+      // 额外确保字幕数据被彻底清除
+      _subtitleData = null;
+      _currentSubtitle = null;
+      _loopingSubtitle = null;
+      _currentSubtitlePath = null;
+      
       // 判断是否为YouTube链接
       if (isYouTubeLink(videoPath)) {
         // 提取YouTube视频ID
@@ -343,6 +349,11 @@ class VideoService extends ChangeNotifier {
       if (_configService != null) {
         _player!.setRate(_configService!.defaultPlaybackRate);
       }
+      
+      // 确保字幕数据被清除，防止使用上一个视频的字幕
+      _subtitleData = null;
+      _currentSubtitle = null;
+      _currentSubtitlePath = null;
       
       // 尝试自动加载字幕
       if (_configService != null && _configService!.autoMatchSubtitle) {
@@ -539,6 +550,14 @@ class VideoService extends ChangeNotifier {
   Future<bool> loadSubtitle(String path) async {
     try {
       debugPrint('开始加载字幕文件: $path');
+      
+      // 检查当前是否有加载视频
+      if (_currentVideoPath == null) {
+        debugPrint('错误：尝试加载字幕但当前没有加载视频');
+        _errorMessage = '请先加载视频再加载字幕';
+        notifyListeners();
+        return false;
+      }
       
       final subtitleFile = File(path);
       if (!subtitleFile.existsSync()) {
@@ -1059,75 +1078,49 @@ class VideoService extends ChangeNotifier {
     }
     
     try {
-      // 获取当前位置
-      final currentPosition = _player!.state.position;
+      // 获取当前位置对应的字幕索引
+      int currentIndex = -1;
       
-      // 考虑字幕时间偏移
-      final adjustedPosition = Duration(
-        milliseconds: max(0, currentPosition.inMilliseconds - _subtitleTimeOffset)
-      );
-      
-      debugPrint('nextSubtitle - 当前位置: ${currentPosition.inMilliseconds}ms, 调整后位置: ${adjustedPosition.inMilliseconds}ms');
-      
-      // 找到当前字幕（如果在字幕内）
-      SubtitleEntry? currentEntry;
-      for (final entry in _subtitleData!.entries) {
-        if (entry.start.inMilliseconds <= adjustedPosition.inMilliseconds && 
-            entry.end.inMilliseconds >= adjustedPosition.inMilliseconds) {
-          currentEntry = entry;
-          debugPrint('当前在字幕内: #${entry.index + 1} "${entry.text.substring(0, min(20, entry.text.length))}..."');
-          break;
-        }
-      }
-      
-      // 找到下一个字幕
-      SubtitleEntry? nextEntry;
-      
-      if (currentEntry != null) {
-        // 如果当前在字幕内，找到紧邻的下一个字幕
-        final currentIndex = currentEntry.index;
-        
-        // 安全检查：确保索引在有效范围内
-        if (currentIndex >= 0 && currentIndex < _subtitleData!.entries.length - 1) {
-          nextEntry = _subtitleData!.entries[currentIndex + 1];
-          debugPrint('找到下一个字幕: #${nextEntry.index + 1}');
-        } else {
-          debugPrint('当前已是最后一个字幕，无法跳转到下一个');
-        }
+      // 如果有当前字幕，直接使用其索引
+      if (_currentSubtitle != null) {
+        currentIndex = _currentSubtitle!.index;
       } else {
-        // 如果当前不在任何字幕内，找到最近的下一个字幕
-        debugPrint('当前不在任何字幕内，查找下一个最近的字幕');
-        int minDistance = -1;
-        for (final entry in _subtitleData!.entries) {
-          if (entry.start.inMilliseconds > adjustedPosition.inMilliseconds) {
-            int distance = entry.start.inMilliseconds - adjustedPosition.inMilliseconds;
-            if (minDistance == -1 || distance < minDistance) {
-              minDistance = distance;
-              nextEntry = entry;
-            }
+        // 如果没有当前字幕，找到最近的已播放字幕
+        final currentPosition = _player!.state.position;
+        final adjustedPosition = Duration(
+          milliseconds: max(0, currentPosition.inMilliseconds - _subtitleTimeOffset)
+        );
+        
+        for (int i = 0; i < _subtitleData!.entries.length; i++) {
+          final entry = _subtitleData!.entries[i];
+          if (entry.end <= adjustedPosition) {
+            currentIndex = entry.index;
+          } else {
+            break;
           }
         }
-        
-        if (nextEntry != null) {
-          debugPrint('找到最近的下一个字幕: #${nextEntry.index + 1}, 距离: ${minDistance}ms');
-        }
       }
       
-      // 如果找到下一个字幕，就跳转到它的开始位置
-      if (nextEntry != null) {
+      // 计算下一个字幕的索引
+      int nextIndex = currentIndex + 1;
+      
+      // 确保索引在有效范围内
+      if (nextIndex >= 0 && nextIndex < _subtitleData!.entries.length) {
+        // 获取下一个字幕
+        final nextEntry = _subtitleData!.entries[nextIndex];
+        
         // 跳转时需要考虑时间偏移
         final seekPosition = Duration(milliseconds: nextEntry.start.inMilliseconds + _subtitleTimeOffset);
-        debugPrint('准备跳转到下一个字幕: #${nextEntry.index + 1}, 位置: ${seekPosition.inMilliseconds}ms');
+        debugPrint('跳转到下一个字幕: #${nextEntry.index + 1}, 位置: ${seekPosition.inMilliseconds}ms');
         
-        // 直接更新当前字幕，避免循环判断问题
+        // 直接更新当前字幕
         _currentSubtitle = nextEntry;
         notifyListeners();
         
         // 执行跳转
         _player!.seek(seekPosition);
-        debugPrint('已跳转到下一个字幕: #${nextEntry.index + 1}, 位置: ${seekPosition.inMilliseconds}ms');
       } else {
-        debugPrint('没有下一个字幕');
+        debugPrint('已经是最后一个字幕或没有找到下一个字幕');
       }
     } catch (e) {
       debugPrint('跳转到下一个字幕错误: $e');
@@ -1142,87 +1135,64 @@ class VideoService extends ChangeNotifier {
     }
     
     try {
-      // 获取当前位置
-      final currentPosition = _player!.state.position;
+      // 获取当前位置对应的字幕索引
+      int currentIndex = -1;
       
-      // 考虑字幕时间偏移
-      final adjustedPosition = Duration(
-        milliseconds: max(0, currentPosition.inMilliseconds - _subtitleTimeOffset)
-      );
-      
-      debugPrint('previousSubtitle - 当前位置: ${currentPosition.inMilliseconds}ms, 调整后位置: ${adjustedPosition.inMilliseconds}ms');
-      
-      // 找到当前字幕（如果在字幕内）
-      SubtitleEntry? currentEntry;
-      for (final entry in _subtitleData!.entries) {
-        if (entry.start.inMilliseconds <= adjustedPosition.inMilliseconds && 
-            entry.end.inMilliseconds >= adjustedPosition.inMilliseconds) {
-          currentEntry = entry;
-          debugPrint('当前在字幕内: #${entry.index + 1}');
-          break;
-        }
-      }
-      
-      // 找到上一个字幕
-      SubtitleEntry? prevEntry;
-      
-      if (currentEntry != null) {
-        // 如果当前在字幕内，且不是第一句，就跳到当前字幕的开始位置
-        // 如果已经在字幕开始附近（前1秒内），则跳到上一个字幕
-        bool nearStart = (adjustedPosition.inMilliseconds - currentEntry.start.inMilliseconds) < 1000;
+      // 如果有当前字幕，直接使用其索引
+      if (_currentSubtitle != null) {
+        currentIndex = _currentSubtitle!.index;
         
-        if (nearStart && currentEntry.index > 0) {
-          // 如果靠近开始且不是第一句，跳到上一句
-          // 安全检查：确保索引在有效范围内
-          final prevIndex = currentEntry.index - 1;
-          if (prevIndex >= 0 && prevIndex < _subtitleData!.entries.length) {
-            prevEntry = _subtitleData!.entries[prevIndex];
-            debugPrint('跳转到上一个字幕: #${prevEntry.index + 1}');
-          }
-        } else if (!nearStart) {
-          // 如果不靠近开始，跳到当前字幕开始
-          prevEntry = currentEntry;
-          debugPrint('跳转到当前字幕开始位置: #${prevEntry.index + 1}');
-        } else {
-          // 如果靠近开始且是第一句，不做任何操作
-          debugPrint('已经是第一个字幕');
+        // 如果当前位置靠近字幕开始位置（前1秒内），则跳到上一个字幕
+        final currentPosition = _player!.state.position;
+        final adjustedPosition = Duration(
+          milliseconds: max(0, currentPosition.inMilliseconds - _subtitleTimeOffset)
+        );
+        
+        bool nearStart = (adjustedPosition.inMilliseconds - _currentSubtitle!.start.inMilliseconds) < 1000;
+        if (!nearStart) {
+          // 如果不靠近开始位置，跳到当前字幕开始
+          final seekPosition = Duration(milliseconds: _currentSubtitle!.start.inMilliseconds + _subtitleTimeOffset);
+          _player!.seek(seekPosition);
+          debugPrint('跳转到当前字幕开始位置: #${_currentSubtitle!.index + 1}');
           return;
         }
       } else {
-        // 如果当前不在任何字幕内，找到最近的上一个字幕
-        debugPrint('当前不在任何字幕内，查找最近的上一个字幕');
-        int minDistance = -1;
-        for (int i = _subtitleData!.entries.length - 1; i >= 0; i--) {
-          final entry = _subtitleData!.entries[i];
-          if (entry.end.inMilliseconds < adjustedPosition.inMilliseconds) {
-            int distance = adjustedPosition.inMilliseconds - entry.end.inMilliseconds;
-            if (minDistance == -1 || distance < minDistance) {
-              minDistance = distance;
-              prevEntry = entry;
-            }
-          }
-        }
+        // 如果没有当前字幕，找到最近的已播放字幕
+        final currentPosition = _player!.state.position;
+        final adjustedPosition = Duration(
+          milliseconds: max(0, currentPosition.inMilliseconds - _subtitleTimeOffset)
+        );
         
-        if (prevEntry != null) {
-          debugPrint('找到最近的上一个字幕: #${prevEntry.index + 1}, 距离: ${minDistance}ms');
+        for (int i = 0; i < _subtitleData!.entries.length; i++) {
+          final entry = _subtitleData!.entries[i];
+          if (entry.end <= adjustedPosition) {
+            currentIndex = entry.index;
+          } else {
+            break;
+          }
         }
       }
       
-      // 如果找到上一个字幕，就跳转到它的开始位置
-      if (prevEntry != null) {
+      // 计算上一个字幕的索引
+      int prevIndex = currentIndex - 1;
+      
+      // 确保索引在有效范围内
+      if (prevIndex >= 0 && prevIndex < _subtitleData!.entries.length) {
+        // 获取上一个字幕
+        final prevEntry = _subtitleData!.entries[prevIndex];
+        
         // 跳转时需要考虑时间偏移
         final seekPosition = Duration(milliseconds: prevEntry.start.inMilliseconds + _subtitleTimeOffset);
-        debugPrint('准备跳转到字幕: #${prevEntry.index + 1}, 位置: ${seekPosition.inMilliseconds}ms');
+        debugPrint('跳转到上一个字幕: #${prevEntry.index + 1}, 位置: ${seekPosition.inMilliseconds}ms');
         
-        // 直接更新当前字幕，避免循环判断问题
+        // 直接更新当前字幕
         _currentSubtitle = prevEntry;
         notifyListeners();
         
         // 执行跳转
         _player!.seek(seekPosition);
-        debugPrint('已跳转到字幕: #${prevEntry.index + 1}, 位置: ${seekPosition.inMilliseconds}ms');
       } else {
-        debugPrint('没有找到可跳转的字幕');
+        debugPrint('已经是第一个字幕或没有找到上一个字幕');
       }
     } catch (e) {
       debugPrint('跳转到上一个字幕错误: $e');

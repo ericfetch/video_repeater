@@ -52,6 +52,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // 添加定期检查焦点的定时器
   Timer? _focusCheckTimer;
   
+  // 添加一个标志，用于控制是否允许从历史记录加载视频
+  bool _allowHistoryLoading = true;
+  
   @override
   void initState() {
     super.initState();
@@ -78,19 +81,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
     
     // 先加载历史记录和生词本
-    _loadHistory().then((_) {
-      // 确保历史记录加载完成后，再尝试恢复播放状态
-      debugPrint('历史记录加载完成，准备恢复播放状态');
-      
-      // 使用更长的延迟，确保UI和服务都已经初始化
-      Future.delayed(const Duration(milliseconds: 1000), () {
-        if (mounted) {
-          FocusScope.of(context).requestFocus(_focusNode);
-          _restoreLastPlayState();
-        }
-      });
-    });
-    
+    _loadHistory();
     _loadVocabulary();
     
     // 监听历史服务变化
@@ -100,9 +91,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   
   @override
   void dispose() {
-    // 保存当前播放状态
-    _saveLastPlayState();
-    
     final historyService = Provider.of<HistoryService>(context, listen: false);
     historyService.removeListener(_onHistoryServiceChanged);
     _focusNode.dispose();
@@ -148,18 +136,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     } else if (state == AppLifecycleState.inactive || 
                state == AppLifecycleState.paused) {
-      // 当应用切换到后台时，隐藏AppBar并保存当前状态
+      // 当应用切换到后台时，隐藏AppBar
       setState(() {
         _showAppBar = false;
       });
-      
-      // 保存当前播放状态
-      _saveLastPlayState();
     }
   }
   
   // 当历史记录服务状态变化时
   void _onHistoryServiceChanged() {
+    // 如果不允许从历史记录加载视频，直接返回
+    if (!_allowHistoryLoading) {
+      debugPrint('历史记录服务状态变化，但当前不允许加载视频');
+      return;
+    }
+    
     final historyService = Provider.of<HistoryService>(context, listen: false);
     final currentHistory = historyService.currentHistory;
     
@@ -927,10 +918,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
   
   // 导航到配置页面
-  void _navigateToConfigScreen(BuildContext context) {
-    Navigator.of(context).push(
+  void _navigateToConfigScreen(BuildContext context) async {
+    // 在打开设置页面前禁用历史记录加载
+    _allowHistoryLoading = false;
+    
+    // 使用await等待设置页面关闭
+    await Navigator.of(context).push(
       MaterialPageRoute(builder: (context) => const ConfigScreen()),
     );
+    
+    // 设置页面关闭后，重新获取焦点，但不重新加载视频
+    if (mounted) {
+      _focusNode.requestFocus();
+      
+      // 延迟一段时间后再允许历史记录加载，确保不会立即触发
+      Future.delayed(const Duration(milliseconds: 500), () {
+        _allowHistoryLoading = true;
+      });
+    }
   }
   
   // 显示YouTube URL输入对话框
