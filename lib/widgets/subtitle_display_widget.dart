@@ -8,6 +8,19 @@ class SubtitleDisplayWidget extends StatelessWidget {
     super.key,
     required this.videoService,
   });
+  
+  // 清理YouTube字幕文本中的特殊标签
+  String _cleanSubtitleText(String text) {
+    // 移除时间戳标签，如<00:00:31.359>
+    text = text.replaceAll(RegExp(r'<\d+:\d+:\d+\.\d+>'), '');
+    // 移除<c>和</c>标签
+    text = text.replaceAll(RegExp(r'</?c>'), '');
+    // 移除其他可能的HTML标签
+    text = text.replaceAll(RegExp(r'<[^>]*>'), '');
+    // 完全移除换行符
+    text = text.replaceAll('\n', '');
+    return text;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,7 +58,7 @@ class SubtitleDisplayWidget extends StatelessWidget {
             Expanded(
               child: SingleChildScrollView(
                 child: Text(
-                  currentSubtitle.text,
+                  _cleanSubtitleText(currentSubtitle.text), // 直接在这里清理文本
                   style: const TextStyle(
                     fontSize: 18,
                     height: 1.5,

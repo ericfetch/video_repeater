@@ -84,6 +84,19 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
     }
   }
   
+  // 清理YouTube字幕文本中的特殊标签
+  String _cleanSubtitleText(String text) {
+    // 移除时间戳标签，如<00:00:31.359>
+    text = text.replaceAll(RegExp(r'<\d+:\d+:\d+\.\d+>'), '');
+    // 移除<c>和</c>标签
+    text = text.replaceAll(RegExp(r'</?c>'), '');
+    // 移除其他可能的HTML标签
+    text = text.replaceAll(RegExp(r'<[^>]*>'), '');
+    // 完全移除换行符
+    text = text.replaceAll('\n', '');
+    return text;
+  }
+  
   @override
   Widget build(BuildContext context) {
     final videoService = widget.videoService ?? Provider.of<VideoService>(context);
@@ -556,11 +569,16 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                             Expanded(
                               child: currentSubtitle != null
                                 ? SubtitleSelectionArea(
-                                    subtitle: currentSubtitle,
+                                    subtitle: SubtitleEntry(
+                                      index: currentSubtitle.index,
+                                      start: currentSubtitle.start,
+                                      end: currentSubtitle.end,
+                                      text: _cleanSubtitleText(currentSubtitle.text), // 直接在这里清理文本
+                                    ),
                                     onSaveWord: (word) {
                                       vocabularyService.addWordToVocabulary(
                                         word, 
-                                        currentSubtitle.text, 
+                                        currentSubtitle.text,
                                         videoService.currentVideoPath ?? ''
                                       );
                                       final messageService = Provider.of<MessageService>(context, listen: false);

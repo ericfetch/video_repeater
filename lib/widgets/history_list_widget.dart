@@ -58,8 +58,59 @@ class HistoryListWidget extends StatelessWidget {
             // 等待视频加载完成
             await Future.delayed(const Duration(milliseconds: 500));
             
+            // 确保视频标题和路径正确更新
+            final videoName = path.basename(item.videoPath);
+            debugPrint('从历史记录加载视频: $videoName, 路径: ${item.videoPath}');
+            
+            // 加载该视频的生词本
+            final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+            vocabularyService.setCurrentVideo(videoName);
+            vocabularyService.loadVocabularyList(videoName);
+            
             // 加载字幕
             if (item.subtitlePath.isNotEmpty && File(item.subtitlePath).existsSync()) {
+              // 验证字幕文件是否与视频匹配
+              final videoFileName = path.basenameWithoutExtension(item.videoPath).toLowerCase();
+              final subtitleFileName = path.basenameWithoutExtension(item.subtitlePath).toLowerCase();
+              
+              // 检查字幕文件名是否包含视频文件名的一部分，或者视频文件名是否包含字幕文件名的一部分
+              bool isMatched = false;
+              
+              // 如果是YouTube视频，检查视频ID是否匹配
+              if (videoFileName.contains('_') && videoFileName.split('_').first.length == 11) {
+                // 可能是YouTube视频，提取视频ID
+                final videoId = videoFileName.split('_').first;
+                isMatched = subtitleFileName.contains(videoId);
+                debugPrint('YouTube视频ID检查: $videoId, 匹配结果: $isMatched');
+              }
+              
+              // 如果不是YouTube视频或ID不匹配，检查文件名相似度
+              if (!isMatched) {
+                // 简单比较：检查文件名是否有相似部分
+                if (videoFileName.length > 5 && subtitleFileName.length > 5) {
+                  // 检查前5个字符是否匹配
+                  isMatched = videoFileName.substring(0, 5) == subtitleFileName.substring(0, 5);
+                  
+                  // 如果不匹配，检查字幕文件名是否包含视频文件名的一部分
+                  if (!isMatched && videoFileName.length > 8) {
+                    isMatched = subtitleFileName.contains(videoFileName.substring(0, 8));
+                  }
+                  
+                  // 如果还不匹配，检查视频文件名是否包含字幕文件名的一部分
+                  if (!isMatched && subtitleFileName.length > 8) {
+                    isMatched = videoFileName.contains(subtitleFileName.substring(0, 8));
+                  }
+                }
+              }
+              
+              debugPrint('字幕文件匹配检查: 视频=$videoFileName, 字幕=$subtitleFileName, 匹配结果=$isMatched');
+              
+              if (!isMatched) {
+                messageService.showMessage('字幕文件可能与视频不匹配，跳过加载');
+                debugPrint('字幕文件可能与视频不匹配，跳过加载');
+                return;
+              }
+              
               // 直接读取字幕文件内容
               final subtitleFile = File(item.subtitlePath);
               final content = await subtitleFile.readAsString();

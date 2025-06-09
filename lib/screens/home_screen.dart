@@ -695,17 +695,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final videoService = Provider.of<VideoService>(context, listen: false);
     final historyService = Provider.of<HistoryService>(context, listen: false);
     
-    if (_currentVideoPath != null && videoService.player != null) {
-      // 记录保存前的视频路径和标题
-      final originalVideoPath = _currentVideoPath;
-      
-      final videoName = path.basename(_currentVideoPath!);
+    // 使用VideoService中的路径，确保是最新的
+    final currentVideoPath = videoService.currentVideoPath;
+    if (currentVideoPath != null && videoService.player != null) {
+      // 使用VideoService中的数据
+      final videoName = path.basename(currentVideoPath);
       final position = videoService.currentPosition;
-      final subtitlePath = _currentSubtitlePath ?? '';
+      final subtitlePath = videoService.currentSubtitlePath ?? '';
       final subtitleTimeOffset = videoService.subtitleTimeOffset;
       
+      debugPrint('保存播放状态 - 使用VideoService中的数据:');
+      debugPrint('- 视频路径: $currentVideoPath');
+      debugPrint('- 字幕路径: $subtitlePath');
+      
       final lastState = VideoHistory(
-        videoPath: _currentVideoPath!,
+        videoPath: currentVideoPath,
         subtitlePath: subtitlePath,
         videoName: videoName,
         lastPosition: position,
@@ -717,11 +721,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       historyService.saveLastPlayState(lastState);
       debugPrint('保存当前播放状态: $videoName - ${position.inSeconds}秒, 字幕偏移: ${subtitleTimeOffset/1000}秒');
       
-      // 检查保存后视频路径是否被错误更改
-      if (_currentVideoPath != originalVideoPath) {
-        debugPrint('检测到视频路径被错误更改，恢复原值');
-        _currentVideoPath = originalVideoPath;
-      }
+      // 更新本地路径变量，确保与VideoService同步
+      _currentVideoPath = currentVideoPath;
+      _currentSubtitlePath = subtitlePath;
     }
   }
   
@@ -759,22 +761,63 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             final subtitleFile = File(lastState.subtitlePath);
             if (subtitleFile.existsSync()) {
               debugPrint('字幕文件存在，开始加载字幕: ${lastState.subtitlePath}');
-              _currentSubtitlePath = lastState.subtitlePath;
-              final subtitleSuccess = await videoService.loadSubtitle(lastState.subtitlePath);
               
-              if (subtitleSuccess) {
-                // 恢复字幕时间偏移
-                if (lastState.subtitleTimeOffset != 0) {
-                  // 计算需要调整的秒数
-                  final offsetSeconds = lastState.subtitleTimeOffset / 1000;
-                  debugPrint('恢复字幕时间偏移: ${offsetSeconds}秒');
+              // 验证字幕文件是否与视频匹配
+              final videoFileName = path.basenameWithoutExtension(lastState.videoPath).toLowerCase();
+              final subtitleFileName = path.basenameWithoutExtension(lastState.subtitlePath).toLowerCase();
+              
+              // 检查字幕文件名是否包含视频文件名的一部分，或者视频文件名是否包含字幕文件名的一部分
+              bool isMatched = false;
+              
+              // 如果是YouTube视频，检查视频ID是否匹配
+              if (videoFileName.contains('_') && videoFileName.split('_').first.length == 11) {
+                // 可能是YouTube视频，提取视频ID
+                final videoId = videoFileName.split('_').first;
+                isMatched = subtitleFileName.contains(videoId);
+                debugPrint('YouTube视频ID检查: $videoId, 匹配结果: $isMatched');
+              }
+              
+              // 如果不是YouTube视频或ID不匹配，检查文件名相似度
+              if (!isMatched) {
+                // 简单比较：检查文件名是否有相似部分
+                if (videoFileName.length > 5 && subtitleFileName.length > 5) {
+                  // 检查前5个字符是否匹配
+                  isMatched = videoFileName.substring(0, 5) == subtitleFileName.substring(0, 5);
                   
-                  // 重置后设置正确的偏移值
-                  videoService.resetSubtitleTime();
-                  videoService.adjustSubtitleTime(offsetSeconds.toInt());
+                  // 如果不匹配，检查字幕文件名是否包含视频文件名的一部分
+                  if (!isMatched && videoFileName.length > 8) {
+                    isMatched = subtitleFileName.contains(videoFileName.substring(0, 8));
+                  }
+                  
+                  // 如果还不匹配，检查视频文件名是否包含字幕文件名的一部分
+                  if (!isMatched && subtitleFileName.length > 8) {
+                    isMatched = videoFileName.contains(subtitleFileName.substring(0, 8));
+                  }
                 }
+              }
+              
+              debugPrint('字幕文件匹配检查: 视频=$videoFileName, 字幕=$subtitleFileName, 匹配结果=$isMatched');
+              
+              if (!isMatched) {
+                debugPrint('字幕文件可能与视频不匹配，跳过加载');
               } else {
-                debugPrint('字幕加载失败');
+                _currentSubtitlePath = lastState.subtitlePath;
+                final subtitleSuccess = await videoService.loadSubtitle(lastState.subtitlePath);
+                
+                if (subtitleSuccess) {
+                  // 恢复字幕时间偏移
+                  if (lastState.subtitleTimeOffset != 0) {
+                    // 计算需要调整的秒数
+                    final offsetSeconds = lastState.subtitleTimeOffset / 1000;
+                    debugPrint('恢复字幕时间偏移: ${offsetSeconds}秒');
+                    
+                    // 重置后设置正确的偏移值
+                    videoService.resetSubtitleTime();
+                    videoService.adjustSubtitleTime(offsetSeconds.toInt());
+                  }
+                } else {
+                  debugPrint('字幕加载失败');
+                }
               }
             } else {
               debugPrint('字幕文件不存在: ${lastState.subtitlePath}');

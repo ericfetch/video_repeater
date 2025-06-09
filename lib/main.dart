@@ -76,8 +76,8 @@ void main() async {
   );
   
   // 添加窗口关闭事件监听
-  windowManager.setPreventClose(true);
-  windowManager.addListener(WindowManagerListener());
+  // windowManager.setPreventClose(true);
+  // windowManager.addListener(WindowManagerListener());
   
   await windowManager.waitUntilReadyToShow(windowOptions, () async {
     await windowManager.show();
@@ -351,84 +351,5 @@ class MessageOverlay extends StatelessWidget {
       default:
         return Icons.info_outline;
     }
-  }
-}
-
-// 窗口管理器监听器
-class WindowManagerListener extends WindowListener {
-  @override
-  void onWindowClose() async {
-    bool isPreventClose = false;
-    
-    try {
-      // 显示保存进度提示
-      final messageService = AppServices.messageService;
-      if (messageService != null) {
-        messageService.showMessage('正在保存播放进度...', durationMs: 2000);
-      }
-      
-      // 暂停视频播放
-      final videoService = AppServices.videoService;
-      if (videoService != null && videoService.player != null && videoService.player!.state.playing) {
-        debugPrint('窗口关闭事件触发，暂停视频并保存当前播放状态');
-        await videoService.player!.pause();
-        debugPrint('已暂停视频播放');
-      }
-      
-      // 保存当前播放状态
-      await saveLastPlayStateGlobal();
-      
-      // 短暂延迟，确保用户能看到保存提示
-      await Future.delayed(const Duration(milliseconds: 800));
-      
-      // 允许窗口关闭
-      windowManager.destroy();
-    } catch (e) {
-      debugPrint('窗口关闭处理错误: $e');
-      // 出错时也允许关闭窗口
-      if (!isPreventClose) {
-        windowManager.destroy();
-      }
-    }
-  }
-}
-
-/// 全局方法：保存最后的播放状态
-/// 在应用关闭时调用
-Future<void> saveLastPlayStateGlobal() async {
-  try {
-    debugPrint('应用关闭，保存最后播放状态');
-    
-    // 获取服务实例
-    final videoService = AppServices.videoService;
-    final historyService = AppServices.historyService;
-    
-    // 确保服务和视频已加载
-    if (videoService != null && 
-        historyService != null && 
-        videoService.player != null && 
-        videoService.currentVideoPath != null) {
-      
-      final videoName = path.basename(videoService.currentVideoPath!);
-      final position = videoService.currentPosition;
-      final subtitlePath = videoService.currentSubtitlePath ?? '';
-      final subtitleTimeOffset = videoService.subtitleTimeOffset;
-      
-      final lastState = VideoHistory(
-        videoPath: videoService.currentVideoPath!,
-        subtitlePath: subtitlePath,
-        videoName: videoName,
-        lastPosition: position,
-        timestamp: DateTime.now(),
-        subtitleTimeOffset: subtitleTimeOffset,
-      );
-      
-      await historyService.saveLastPlayState(lastState);
-      debugPrint('成功保存最后播放状态: $videoName - ${position.inSeconds}秒, 字幕偏移: ${subtitleTimeOffset/1000}秒');
-    } else {
-      debugPrint('无法保存播放状态：未加载视频或播放器未初始化');
-    }
-  } catch (e) {
-    debugPrint('保存最后播放状态时发生错误: $e');
   }
 }

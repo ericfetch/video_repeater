@@ -1001,11 +1001,18 @@ class VideoService extends ChangeNotifier {
     _debounceTimer?.cancel();
     _debounceTimer = null;
     
-    // 重置路径
+    // 重置路径和标题信息（确保完全清理）
+    final oldVideoPath = _currentVideoPath;
+    final oldSubtitlePath = _currentSubtitlePath;
+    final oldVideoTitle = _videoTitle;
+    
     _currentVideoPath = null;
     _currentSubtitlePath = null;
+    _videoTitle = '视频复读机'; // 重置为默认标题
     
-    debugPrint('资源清理完成');
+    debugPrint('资源清理完成 - 旧路径: $oldVideoPath -> null');
+    debugPrint('字幕路径: $oldSubtitlePath -> null');
+    debugPrint('视频标题: $oldVideoTitle -> $_videoTitle');
   }
   
   // 切换播放/暂停状态
@@ -1576,6 +1583,9 @@ class VideoService extends ChangeNotifier {
   // 从SRT格式的文本解析字幕
   SubtitleData? parseSrtSubtitle(String content) {
     try {
+      // 首先对整个内容进行预处理，清理YouTube特有的标签
+      content = _cleanYouTubeSubtitleContent(content);
+      
       final lines = content.split('\n');
       final List<SubtitleEntry> entries = [];
       
@@ -1641,6 +1651,16 @@ class VideoService extends ChangeNotifier {
       debugPrint('解析SRT字幕出错: $e');
       return null;
     }
+  }
+  
+  // 清理YouTube字幕内容中的特殊标签
+  String _cleanYouTubeSubtitleContent(String content) {
+    // 移除时间戳标签，如<00:00:31.359>
+    content = content.replaceAll(RegExp(r'<\d+:\d+:\d+\.\d+>'), '');
+    // 移除<c>和</c>标签
+    content = content.replaceAll(RegExp(r'</?c>'), '');
+    // 保留其他可能的HTML标签，因为它们可能是格式的一部分
+    return content;
   }
   
   // 解析SRT时间格式为Duration
@@ -1870,5 +1890,14 @@ class VideoService extends ChangeNotifier {
     _errorMessage = null;
     
     notifyListeners();
+  }
+  
+  // 获取当前时间的字幕
+  SubtitleEntry? getCurrentSubtitle() {
+    if (_subtitleData == null || _player == null) {
+      return null;
+    }
+    
+    return _currentSubtitle;
   }
 } 
