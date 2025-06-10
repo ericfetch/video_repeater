@@ -26,11 +26,14 @@ class SubtitleSelectionArea extends StatelessWidget {
   Widget build(BuildContext context) {
     return SelectableText(
       subtitle.text,
+      textAlign: TextAlign.left,
+      maxLines: 1,
       style: TextStyle(
         fontSize: fontSize,
         fontWeight: fontWeight,
         letterSpacing: 0.5,
-        height: 1.5,
+        height: 1.2,
+        overflow: TextOverflow.ellipsis,
         // 如果模糊，应用模糊效果
         shadows: isBlurred ? [
           const Shadow(

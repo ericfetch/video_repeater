@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:logging/logging.dart';
 import '../models/subtitle_model.dart';
 import 'config_service.dart';
+import 'download_info_service.dart';
 import 'package:flutter/services.dart';
 
 class YouTubeService {
@@ -472,8 +473,56 @@ class YouTubeService {
       
       // 选择最佳音质的音频流
       var audioStreamsList = audioStreams.toList();
-      audioStreamsList.sort((a, b) => b.bitrate.compareTo(a.bitrate));
-      var selectedAudioStream = audioStreamsList.first;
+      
+      // 首先检查是否有原始音频流（通常是英语）
+      // 对音频流进行分类，优先选择原始音频而非配音版本
+      var originalAudioStreams = audioStreamsList.where((stream) {
+        // YouTube原始音频通常没有特殊标记，但配音版本通常会在标签中包含语言信息
+        // 检查是否为配音版本的特征
+        final tag = stream.tag.toString().toLowerCase();
+        final description = stream.toString().toLowerCase();
+        
+        // 检查是否包含非原始音频的关键词
+        final containsDubKeywords = tag.contains('dubbed') || tag.contains('dub') || 
+                                   tag.contains('voice') || tag.contains('translation');
+        
+        // 检查是否包含特定语言代码（非英语）
+        final containsNonEnglishCode = tag.contains('pt-') || tag.contains('es-') || 
+                                      tag.contains('fr-') || tag.contains('de-') || 
+                                      tag.contains('it-') || tag.contains('ru-');
+        
+        // 检查是否包含语言名称
+        final containsLanguageName = description.contains('portuguese') || 
+                                    description.contains('spanish') || 
+                                    description.contains('french') || 
+                                    description.contains('german') || 
+                                    description.contains('italian') || 
+                                    description.contains('russian');
+        
+        // 判断是否为原始音频
+        final isOriginal = !containsDubKeywords && !containsNonEnglishCode && !containsLanguageName;
+        
+        // 输出每个音频流的信息用于调试
+        debugPrint('音频流: 比特率=${stream.bitrate.bitsPerSecond/1000}kbps, 编码=${stream.audioCodec}, ' +
+                  '标签=${stream.tag}, 判断为${isOriginal ? "原始音频" : "可能是配音"}');
+        
+        return isOriginal;
+      }).toList();
+      
+      // 声明变量
+      var selectedAudioStream;
+      
+      // 如果找到原始音频流，则从中选择最高质量的
+      if (originalAudioStreams.isNotEmpty) {
+        originalAudioStreams.sort((a, b) => b.bitrate.compareTo(a.bitrate));
+        selectedAudioStream = originalAudioStreams.first;
+        debugPrint('选择原始音频流: ${selectedAudioStream.bitrate}bps, ${selectedAudioStream.audioCodec}');
+      } else {
+        // 如果没有找到原始音频流，则使用默认排序方法
+        audioStreamsList.sort((a, b) => b.bitrate.compareTo(a.bitrate));
+        selectedAudioStream = audioStreamsList.first;
+        debugPrint('未找到原始音频流，使用最高比特率的音频: ${selectedAudioStream.bitrate}bps, ${selectedAudioStream.audioCodec}');
+      }
       
       debugPrint('已选择视频流: ${selectedVideoStream.qualityLabel}, ${selectedVideoStream.videoResolution}, ${selectedVideoStream.bitrate}bps');
       debugPrint('已选择音频流: ${selectedAudioStream.bitrate}bps, ${selectedAudioStream.audioCodec}');
@@ -554,7 +603,7 @@ class YouTubeService {
       
     } catch (e) {
       debugPrint('下载视频时发生错误: $e');
-      onStatusUpdate('错误: ${e.toString()}');
+      onStatusUpdate?.call('错误: ${e.toString()}');
         return null;
     }
   }
@@ -1217,24 +1266,61 @@ class YouTubeService {
     }
   }
   
-  // 清理整个YouTube字幕内容
+  // 清理YouTube字幕内容中的特殊标签和格式问题
   String _cleanYouTubeSpecificContent(String content) {
-    final lines = content.split('\n');
-    final cleanedLines = <String>[];
-    
-    for (int i = 0; i < lines.length; i++) {
-      String line = lines[i];
+    try {
+      debugPrint('清理YouTube字幕内容中的特殊标签');
       
-      // 如果不是时间行或序号行，则清理特殊标签
-      if (!line.contains('-->') && int.tryParse(line.trim()) == null) {
-        // 清理YouTube特有的标签
-        line = _cleanYouTubeSpecificTags(line);
+      // 检查内容是否为空
+      if (content.isEmpty) {
+        return content;
       }
       
-      cleanedLines.add(line);
+      // 清理常见的HTML/XML标签
+      var cleaned = content
+          .replaceAll(RegExp(r'</?[^>]+(>|$)'), '') // 移除所有HTML/XML标签
+          .replaceAll(RegExp(r'&[a-zA-Z]+;'), ' ') // 替换HTML实体如&nbsp;
+          .replaceAll(RegExp(r'&#\d+;'), ' '); // 替换数字HTML实体如&#39;
+      
+      // 移除多余的空白字符
+      cleaned = cleaned.replaceAll(RegExp(r'\s{2,}'), ' ').trim();
+      
+      // 检查是否有非法的XML字符
+      cleaned = cleaned.replaceAll(RegExp(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]'), '');
+      
+      // 修复SRT格式中可能的问题
+      final lines = cleaned.split('\n');
+      final result = StringBuffer();
+      
+      int index = 1;
+      for (int i = 0; i < lines.length; i++) {
+        final line = lines[i].trim();
+        
+        // 跳过空行
+        if (line.isEmpty) {
+          continue;
+        }
+        
+        // 如果是数字行，可能是索引
+        if (RegExp(r'^\d+$').hasMatch(line)) {
+          result.writeln(index);
+          index++;
+        }
+        // 如果是时间行
+        else if (line.contains('-->')) {
+          result.writeln(line);
+        }
+        // 否则是文本行
+        else {
+          result.writeln(line);
+        }
+      }
+      
+      return result.toString().trim();
+    } catch (e) {
+      debugPrint('清理字幕内容出错: $e');
+      return content; // 出错时返回原始内容
     }
-    
-    return cleanedLines.join('\n');
   }
   
   // 清理字幕文本
@@ -1266,9 +1352,10 @@ class YouTubeService {
   // 下载视频和字幕
   Future<(String, String?)?> downloadVideoAndSubtitles(
     String videoUrl, {
-    Function(String)? onStatusUpdate,
     Function(double)? onProgress,
+    Function(String)? onStatusUpdate,
     String? preferredQuality,
+    DownloadInfoService? downloadInfoService,
   }) async {
     try {
       // 提供更详细的初始状态
@@ -1286,6 +1373,17 @@ class YouTubeService {
         onStatusUpdate?.call('使用已下载的视频文件');
         debugPrint('使用已下载的视频: $existingVideo');
         debugPrint('字幕路径: $existingSubtitle');
+        
+        // 获取可用字幕轨道并显示在面板中
+        if (downloadInfoService != null) {
+          onStatusUpdate?.call('获取可用字幕轨道...');
+          final subtitleTracks = await getAllSubtitleTracks(videoId);
+          if (subtitleTracks.isNotEmpty) {
+            downloadInfoService.setAvailableSubtitleTracks(subtitleTracks, videoId);
+            onStatusUpdate?.call('找到${subtitleTracks.length}个可用字幕轨道');
+          }
+        }
+        
         return (existingVideo, existingSubtitle);
       }
       
@@ -1317,32 +1415,47 @@ class YouTubeService {
         return null;
       }
       
-      // 下载字幕
+      // 获取可用字幕轨道并显示在面板中
       String? subtitleFile;
-      try {
-        subtitleFile = await downloadSubtitles(videoId, onStatusUpdate: onStatusUpdate);
-    } catch (e) {
-      debugPrint('下载字幕错误: $e');
-        subtitleFile = null;
+      if (downloadInfoService != null) {
+        onStatusUpdate?.call('获取可用字幕轨道...');
+        final subtitleTracks = await getAllSubtitleTracks(videoId);
+        if (subtitleTracks.isNotEmpty) {
+          downloadInfoService.setAvailableSubtitleTracks(subtitleTracks, videoId);
+          onStatusUpdate?.call('找到${subtitleTracks.length}个可用字幕轨道');
+        } else {
+          // 如果没有找到字幕轨道，尝试下载默认字幕
+          try {
+            subtitleFile = await downloadSubtitles(videoId, onStatusUpdate: onStatusUpdate);
+          } catch (e) {
+            debugPrint('下载字幕错误: $e');
+            subtitleFile = null;
+          }
+        }
+      } else {
+        // 下载字幕
+        try {
+          subtitleFile = await downloadSubtitles(videoId, onStatusUpdate: onStatusUpdate);
+        } catch (e) {
+          debugPrint('下载字幕错误: $e');
+          subtitleFile = null;
+        }
       }
       
       // 添加到缓存
-      final videoFilename = path.basename(videoFile);
-      final subtitleFilename = subtitleFile != null ? path.basename(subtitleFile) : null;
+      final fileName = path.basename(videoFile);
+      final subtitleFileName = subtitleFile != null ? path.basename(subtitleFile) : null;
+      await _addToDownloadCache(videoId, fileName, subtitleFileName);
       
-      // 检查文件名是否以videoId开头，不是的话可能是旧格式，需要确保添加到缓存中的文件名正确
-      if (!videoFilename.startsWith('${videoId}_')) {
-        debugPrint('警告: 视频文件名不是以视频ID开头，可能影响缓存查找');
+      // 通知下载完成
+      if (downloadInfoService != null) {
+        downloadInfoService.endDownload();
       }
       
-      await _addToDownloadCache(videoId, videoFilename, subtitleFilename);
-      debugPrint('已将视频添加到缓存: videoId=$videoId, videoFilename=$videoFilename, subtitleFilename=$subtitleFilename');
-      
       return (videoFile, subtitleFile);
-    } catch (e, stackTrace) {
-      debugPrint('下载视频和字幕出错: $e');
-      debugPrint('堆栈: $stackTrace');
-      onStatusUpdate?.call('下载出错: $e');
+    } catch (e) {
+      debugPrint('下载YouTube视频时发生错误: $e');
+      onStatusUpdate?.call('下载失败: $e');
       return null;
     }
   }
@@ -1686,9 +1799,9 @@ class YouTubeService {
   }
   
   // 直接通过HTTP请求获取WebVTT格式字幕
-  Future<String?> _getSubtitlesDirectly(String videoId) async {
+  Future<String?> _getSubtitlesDirectly(String videoId, {String? preferredLanguage}) async {
     try {
-      debugPrint('尝试直接通过HTTP请求获取WebVTT字幕');
+      debugPrint('尝试直接通过HTTP请求获取WebVTT字幕，首选语言: ${preferredLanguage ?? "默认"}');
       
       // 获取视频页面
       final response = await http.get(
@@ -1698,6 +1811,7 @@ class YouTubeService {
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           'Accept-Language': 'en-us,en;q=0.5',
           'Sec-Fetch-Mode': 'navigate',
+          'Cookie': 'CONSENT=YES+cb', // 添加基本的Cookie以避免某些限制
         }
       );
       
@@ -1712,7 +1826,23 @@ class YouTubeService {
       
       if (match == null || match.groupCount < 1) {
         debugPrint('未找到player_response数据');
-        return null;
+        
+        // 尝试使用备用正则表达式
+        final altRegex = RegExp(r'"captions":\s*(\{.+?\}\})');
+        final altMatch = altRegex.firstMatch(response.body);
+        if (altMatch == null || altMatch.groupCount < 1) {
+          debugPrint('备用正则表达式也未找到字幕数据');
+          return null;
+        }
+        
+        String? captionsJson = '{${altMatch.group(1)}}';
+        try {
+          Map<String, dynamic> captionsData = jsonDecode(captionsJson);
+          return _processCaptionsData(captionsData, preferredLanguage);
+        } catch (e) {
+          debugPrint('解析备用字幕数据失败: $e');
+          return null;
+        }
       }
       
       String? playerResponseJson = match.group(1);
@@ -1742,32 +1872,55 @@ class YouTubeService {
         }
       }
       
+      return _processCaptionsData(playerResponse, preferredLanguage);
+    } catch (e) {
+      debugPrint('直接获取字幕失败: $e');
+      return null;
+    }
+  }
+  
+  // 处理从页面提取的字幕数据
+  Future<String?> _processCaptionsData(Map<String, dynamic> data, String? preferredLanguage) async {
+    try {
       // 提取字幕URL
-      try {
-        final captions = playerResponse['captions'];
-        if (captions == null) {
-          debugPrint('未找到字幕数据');
-          return null;
-        }
-        
-        final captionTracks = captions['playerCaptionsTracklistRenderer']?['captionTracks'];
-        if (captionTracks == null || captionTracks is! List || captionTracks.isEmpty) {
-          debugPrint('未找到字幕轨道');
-          return null;
-        }
-        
-        // 打印所有可用字幕轨道
-        debugPrint('找到${captionTracks.length}条字幕轨道:');
+      final captions = data['captions'];
+      if (captions == null) {
+        debugPrint('未找到字幕数据');
+        return null;
+      }
+      
+      final captionTracks = captions['playerCaptionsTracklistRenderer']?['captionTracks'];
+      if (captionTracks == null || captionTracks is! List || captionTracks.isEmpty) {
+        debugPrint('未找到字幕轨道');
+        return null;
+      }
+      
+      // 打印所有可用字幕轨道
+      debugPrint('找到${captionTracks.length}条字幕轨道:');
+      for (final track in captionTracks) {
+        final lang = track['languageCode'];
+        final name = track['name']?['simpleText'] ?? track['name']?['runs']?[0]?['text'];
+        final isAuto = track['kind'] == 'asr';
+        debugPrint('- $name ($lang): ${isAuto ? "自动生成" : "人工添加"}');
+      }
+      
+      // 选择字幕轨道
+      Map<String, dynamic>? selectedTrack;
+      
+      // 如果指定了首选语言，优先选择该语言的字幕
+      if (preferredLanguage != null) {
         for (final track in captionTracks) {
-          final lang = track['languageCode'];
-          final name = track['name']?['simpleText'] ?? track['name']?['runs']?[0]?['text'];
-          final isAuto = track['kind'] == 'asr';
-          debugPrint('- $name ($lang): ${isAuto ? "自动生成" : "人工添加"}');
+          final lang = (track['languageCode'] as String).toLowerCase();
+          if (lang == preferredLanguage.toLowerCase()) {
+            selectedTrack = track;
+            debugPrint('找到首选语言字幕: $preferredLanguage');
+            break;
+          }
         }
-        
-        // 优先选择英文字幕
-        Map<String, dynamic>? selectedTrack;
-        
+      }
+      
+      // 如果没有找到首选语言字幕，按优先级选择
+      if (selectedTrack == null) {
         // 首先寻找非自动生成的英文字幕
         for (final track in captionTracks) {
           final lang = (track['languageCode'] as String).toLowerCase();
@@ -1812,49 +1965,161 @@ class YouTubeService {
           final lang = selectedTrack?['languageCode'] ?? 'unknown';
           debugPrint('使用第一个可用字幕: $lang');
         }
-        
-        if (selectedTrack == null) {
-          debugPrint('无法选择任何字幕轨道');
-          return null;
-        }
-        
-        // 获取字幕URL
-        String baseUrl = selectedTrack!['baseUrl'];
-        debugPrint('字幕基础URL: $baseUrl');
-        
-        // 添加格式参数，获取WebVTT格式
-        final vttUrl = '$baseUrl&fmt=vtt';
-        debugPrint('WebVTT字幕URL: $vttUrl');
-        
-        // 下载字幕内容
-        final subtitleResponse = await http.get(Uri.parse(vttUrl));
-        if (subtitleResponse.statusCode != 200) {
-          debugPrint('获取字幕内容失败: ${subtitleResponse.statusCode}');
-          return null;
-        }
-        
-        final vttContent = subtitleResponse.body;
-        if (vttContent.isEmpty) {
-          debugPrint('字幕内容为空');
-          return null;
-        }
-        
-        debugPrint('成功获取WebVTT字幕，长度: ${vttContent.length}字节');
-        debugPrint('WebVTT内容片段: ${vttContent.substring(0, vttContent.length > 200 ? 200 : vttContent.length)}');
-        
-        // 转换为SRT格式
-        return _convertVttToSrt(vttContent);
-        
-      } catch (e) {
-        debugPrint('提取字幕URL失败: $e');
+      }
+      
+      if (selectedTrack == null) {
+        debugPrint('无法选择任何字幕轨道');
         return null;
       }
+      
+      // 获取字幕URL
+      String baseUrl = selectedTrack!['baseUrl'];
+      debugPrint('字幕基础URL: $baseUrl');
+      
+      // 添加格式参数，获取WebVTT格式
+      final vttUrl = '$baseUrl&fmt=vtt';
+      debugPrint('WebVTT字幕URL: $vttUrl');
+      
+      // 下载字幕内容，添加重试机制
+      String? vttContent;
+      int maxRetries = 3;
+      for (int i = 0; i < maxRetries; i++) {
+        try {
+          final subtitleResponse = await http.get(
+            Uri.parse(vttUrl),
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36',
+              'Cookie': 'CONSENT=YES+cb',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+              'Accept-Language': 'en-US,en;q=0.5',
+            }
+          );
+          
+          if (subtitleResponse.statusCode != 200) {
+            debugPrint('获取字幕内容失败 (尝试 ${i+1}/${maxRetries}): ${subtitleResponse.statusCode}');
+            await Future.delayed(Duration(seconds: 1)); // 延迟1秒后重试
+            continue;
+          }
+          
+          vttContent = subtitleResponse.body;
+          if (vttContent.isEmpty) {
+            debugPrint('字幕内容为空 (尝试 ${i+1}/${maxRetries})');
+            await Future.delayed(Duration(seconds: 1));
+            continue;
+          }
+          
+          // 检查是否为XML格式，如果是，检查是否有错误
+          if (vttContent.trim().startsWith('<?xml') || vttContent.trim().startsWith('<transcript>')) {
+            debugPrint('检测到XML格式的字幕，检查是否有错误');
+            
+            // 检查是否包含错误信息
+            final hasError = vttContent.contains('<error>') || vttContent.contains('<e>');
+            if (hasError) {
+              final errorRegex = RegExp(r'<(?:error|e)>([^<]+)</(?:error|e)>');
+              final match = errorRegex.firstMatch(vttContent);
+              if (match != null && match.groupCount >= 1) {
+                final errorMsg = match.group(1);
+                debugPrint('XML字幕包含错误: $errorMsg');
+                
+                // 如果是最后一次尝试，则继续尝试解析，否则尝试其他方式
+                if (i == maxRetries - 1) {
+                  debugPrint('这是最后一次尝试，继续处理XML');
+                } else {
+                  debugPrint('尝试其他方式获取字幕');
+                  await Future.delayed(Duration(seconds: 1));
+                  continue;
+                }
+              }
+            }
+            
+            // 尝试解析XML格式的字幕
+            try {
+              final xmlContent = vttContent;
+              
+              // 简单的XML解析，提取文本和时间信息
+              final textRegex = RegExp(r'<text[^>]*start="([^"]+)"[^>]*dur="([^"]+)"[^>]*>([^<]*)</text>');
+              final matches = textRegex.allMatches(xmlContent);
+              
+              if (matches.isEmpty) {
+                debugPrint('未找到XML格式的字幕内容');
+                if (i < maxRetries - 1) {
+                  await Future.delayed(Duration(seconds: 1));
+                  continue;
+                }
+              } else {
+                // 构建SRT格式的字幕
+                final srtBuffer = StringBuffer();
+                int index = 1;
+                
+                for (final match in matches) {
+                  if (match.groupCount >= 3) {
+                    final startSeconds = double.tryParse(match.group(1) ?? '0') ?? 0;
+                    final durationSeconds = double.tryParse(match.group(2) ?? '0') ?? 0;
+                    final endSeconds = startSeconds + durationSeconds;
+                    final text = match.group(3) ?? '';
+                    
+                    if (text.trim().isNotEmpty) {
+                      // 索引编号
+                      srtBuffer.writeln(index);
+                      index++;
+                      
+                      // 时间格式
+                      final start = _formatTimestamp(Duration(milliseconds: (startSeconds * 1000).round()));
+                      final end = _formatTimestamp(Duration(milliseconds: (endSeconds * 1000).round()));
+                      srtBuffer.writeln('$start --> $end');
+                      
+                      // 字幕文本
+                      srtBuffer.writeln(text);
+                      srtBuffer.writeln();
+                    }
+                  }
+                }
+                
+                final result = srtBuffer.toString().trim();
+                if (result.isNotEmpty) {
+                  debugPrint('成功从XML格式提取${index - 1}条字幕');
+                  return result;
+                }
+              }
+            } catch (e) {
+              debugPrint('解析XML字幕失败: $e');
+              if (i < maxRetries - 1) {
+                await Future.delayed(Duration(seconds: 1));
+                continue;
+              }
+            }
+          }
+          
+          debugPrint('成功获取WebVTT字幕，长度: ${vttContent.length}字节');
+          break;
+        } catch (e) {
+          debugPrint('获取字幕内容出错 (尝试 ${i+1}/${maxRetries}): $e');
+          if (i < maxRetries - 1) {
+            await Future.delayed(Duration(seconds: 1));
+          }
+        }
+      }
+      
+      if (vttContent == null || vttContent.isEmpty) {
+        debugPrint('多次尝试后仍无法获取字幕内容');
+        return null;
+      }
+      
+      // 检查内容是否为有效的WebVTT格式
+      if (!vttContent.trim().startsWith('WEBVTT') && !vttContent.contains('-->')) {
+        debugPrint('获取到的内容不是有效的WebVTT格式');
+        debugPrint('内容片段: ${vttContent.substring(0, vttContent.length > 100 ? 100 : vttContent.length)}');
+        return null;
+      }
+      
+      // 转换为SRT格式
+      return _convertVttToSrt(vttContent);
     } catch (e) {
-      debugPrint('直接获取字幕失败: $e');
+      debugPrint('处理字幕数据失败: $e');
       return null;
     }
   }
-
+  
   // 从官方API获取字幕
   Future<String?> _getSubtitlesFromOfficialApi(String videoId, Function(String)? onStatusUpdate) async {
     try {
@@ -1910,12 +2175,15 @@ class YouTubeService {
   }
 
   // 从HTTP API获取字幕
-  Future<String?> _getSubtitlesFromHttpApi(String videoId) async {
+  Future<String?> _getSubtitlesFromHttpApi(String videoId, {String? langCode}) async {
     try {
-      debugPrint('尝试从HTTP API获取字幕');
+      debugPrint('尝试从HTTP API获取字幕，语言: ${langCode ?? "默认"}');
       
       // 构建API请求URL
-      final apiUrl = 'https://youtubetranscript.com/?server_vid=$videoId';
+      String apiUrl = 'https://youtubetranscript.com/?server_vid=$videoId';
+      if (langCode != null) {
+        apiUrl += '&lang=$langCode';
+      }
       debugPrint('请求URL: $apiUrl');
       
       // 发送请求
@@ -1972,70 +2240,940 @@ class YouTubeService {
   // 将WebVTT格式转换为SRT格式
   String? _convertVttToSrt(String vttContent) {
     try {
-      debugPrint('开始将WebVTT转换为SRT');
+      debugPrint('开始转换WebVTT到SRT格式');
+      
+      // 检查内容是否为WebVTT格式
+      if (!vttContent.contains('WEBVTT') && !vttContent.contains('Kind:')) {
+        debugPrint('内容不是标准的WebVTT格式，尝试直接解析');
+        debugPrint('内容前100个字符: ${vttContent.substring(0, min(100, vttContent.length))}');
+      }
       
       // 分割行
       final lines = vttContent.split('\n');
-      final srtContent = StringBuffer();
-      int subtitleIndex = 1;
+      debugPrint('WebVTT共有${lines.length}行');
       
-      // 跳过WebVTT头部
-      int i = 0;
-      while (i < lines.length && !lines[i].contains('-->')) {
-        i++;
+      // 移除WebVTT头部
+      int startIndex = 0;
+      for (int i = 0; i < min(10, lines.length); i++) {
+        if (lines[i].contains('-->')) {
+          startIndex = i;
+          break;
+        }
       }
       
-      // 解析字幕内容
+      debugPrint('找到第一个时间标记行，索引: $startIndex');
+      
+      // 解析字幕
+      final srtLines = <String>[];
+      int subtitleIndex = 1;
+      int i = startIndex;
+      
       while (i < lines.length) {
-        final line = lines[i].trim();
-        i++;
-        
-        // 如果是时间行
-        if (line.contains('-->')) {
-          // 写入索引编号
-          srtContent.writeln(subtitleIndex);
-          subtitleIndex++;
+        // 查找时间行
+        if (lines[i].contains('-->')) {
+          // 添加字幕索引
+          srtLines.add(subtitleIndex.toString());
           
-          // 转换时间格式: 00:00:00.000 --> 00:00:00.000 转为 00:00:00,000 --> 00:00:00,000
-          final times = line.split('-->');
-          if (times.length == 2) {
-            final startTime = times[0].trim().replaceAll('.', ',');
-            final endTime = times[1].trim().replaceAll('.', ',');
-            srtContent.writeln('$startTime --> $endTime');
-          } else {
-            // 如果时间格式不正确，使用原始格式
-            srtContent.writeln(line);
-          }
+          // 处理时间格式
+          final timeLine = lines[i].trim();
+          final convertedTimeLine = _convertVttTimeToSrtTime(timeLine);
+          srtLines.add(convertedTimeLine);
           
-          // 收集文本内容直到遇到空行或下一个时间行
-          final textBuffer = StringBuffer();
-          while (i < lines.length && lines[i].trim().isNotEmpty && !lines[i].contains('-->')) {
-            textBuffer.writeln(lines[i].trim());
+          // 收集字幕文本
+          final textLines = <String>[];
+          i++;
+          while (i < lines.length && lines[i].trim().isNotEmpty) {
+            textLines.add(lines[i].trim());
             i++;
           }
           
-          // 写入文本内容
-          final text = textBuffer.toString().trim();
-          if (text.isNotEmpty) {
-            srtContent.writeln(text);
-            srtContent.writeln(); // 空行分隔
-          } else {
-            // 回退计数器，因为没有有效文本
-            subtitleIndex--;
+          // 添加字幕文本
+          if (textLines.isNotEmpty) {
+            srtLines.add(textLines.join('\n'));
+            srtLines.add(''); // 空行分隔
+            subtitleIndex++;
+          }
+        } else {
+          i++;
+        }
+      }
+      
+      debugPrint('转换完成，SRT格式共有${srtLines.length}行，${subtitleIndex-1}个字幕');
+      
+      // 如果没有找到任何字幕，返回null
+      if (subtitleIndex <= 1) {
+        debugPrint('未找到有效字幕');
+        return null;
+      }
+      
+      return srtLines.join('\n');
+    } catch (e, stackTrace) {
+      debugPrint('转换WebVTT到SRT格式失败: $e');
+      debugPrint('错误堆栈: $stackTrace');
+      return null;
+    }
+  }
+  
+  // 转换WebVTT时间格式为SRT时间格式
+  String _convertVttTimeToSrtTime(String vttTime) {
+    try {
+      // 处理WebVTT时间格式
+      final parts = vttTime.split('-->');
+      if (parts.length != 2) {
+        debugPrint('无效的时间格式: $vttTime');
+        return vttTime; // 返回原始格式
+      }
+      
+      String startTime = parts[0].trim();
+      String endTime = parts[1].trim();
+      
+      // 移除时间之后的设置（如position:50%）
+      if (endTime.contains(' ')) {
+        endTime = endTime.split(' ')[0];
+      }
+      
+      // 确保毫秒部分有3位数字
+      startTime = _ensureMillisecondsFormat(startTime);
+      endTime = _ensureMillisecondsFormat(endTime);
+      
+      return '$startTime --> $endTime';
+    } catch (e) {
+      debugPrint('转换时间格式失败: $e');
+      return vttTime; // 出错时返回原始格式
+    }
+  }
+  
+  // 确保时间格式的毫秒部分有3位数字
+  String _ensureMillisecondsFormat(String time) {
+    try {
+      // 处理00:00:00.000格式
+      if (time.contains('.')) {
+        final parts = time.split('.');
+        String milliseconds = parts[1];
+        
+        // 如果毫秒部分不是3位数字，进行调整
+        if (milliseconds.length < 3) {
+          milliseconds = milliseconds.padRight(3, '0');
+        } else if (milliseconds.length > 3) {
+          milliseconds = milliseconds.substring(0, 3);
+        }
+        
+        return '${parts[0]}.$milliseconds';
+      }
+      // 处理00:00:00,000格式
+      else if (time.contains(',')) {
+        final parts = time.split(',');
+        String milliseconds = parts[1];
+        
+        // 如果毫秒部分不是3位数字，进行调整
+        if (milliseconds.length < 3) {
+          milliseconds = milliseconds.padRight(3, '0');
+        } else if (milliseconds.length > 3) {
+          milliseconds = milliseconds.substring(0, 3);
+        }
+        
+        return '${parts[0]},$milliseconds';
+      }
+      // 如果没有毫秒部分，添加.000
+      else {
+        return '$time.000';
+      }
+    } catch (e) {
+      debugPrint('调整毫秒格式失败: $e');
+      return time; // 出错时返回原始格式
+    }
+  }
+  
+  // 获取视频的所有字幕轨道
+  Future<List<Map<String, dynamic>>> getAllSubtitleTracks(String videoId) async {
+    try {
+      debugPrint('获取视频的所有字幕轨道: $videoId');
+      final List<Map<String, dynamic>> result = [];
+      // 不再使用语言代码集合来过滤字幕
+      // final Set<String> addedLanguageCodes = {}; 
+      
+      // 尝试从官方API获取字幕轨道
+      try {
+        final manifest = await _yt.videos.closedCaptions.getManifest(videoId);
+        if (manifest.tracks.isNotEmpty) {
+          debugPrint('从官方API获取到${manifest.tracks.length}个字幕轨道');
+          
+          // 为相同语言代码的轨道计数
+          final Map<String, int> languageCount = {};
+          
+          for (var track in manifest.tracks) {
+            final languageCode = track.language.code;
+            
+            // 更新语言计数
+            languageCount[languageCode] = (languageCount[languageCode] ?? 0) + 1;
+            final count = languageCount[languageCode]!;
+            
+            // 添加所有轨道，不再过滤相同语言代码
+            result.add({
+              'source': 'official',
+              'languageCode': languageCode,
+              'languageName': track.language.name,
+              'isAutoGenerated': track.isAutoGenerated,
+              // 在名称中添加更多信息来区分相同语言的不同轨道
+              'name': '${track.language.name}${track.isAutoGenerated ? " (自动生成)" : ""} ${count > 1 ? "#$count" : ""}',
+              'track': track,
+            });
+          }
+          
+          // 如果从官方API获取到了字幕轨道，就不再尝试从网页获取
+          if (result.isNotEmpty) {
+            return result;
+          }
+        }
+      } catch (e) {
+        debugPrint('从官方API获取字幕轨道失败: $e');
+      }
+      
+      // 如果官方API失败，尝试从网页获取字幕轨道
+      try {
+        // 获取视频页面
+        final response = await http.get(
+          Uri.parse('https://www.youtube.com/watch?v=$videoId'),
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-us,en;q=0.5',
+            'Sec-Fetch-Mode': 'navigate',
+          }
+        );
+        
+        if (response.statusCode != 200) {
+          debugPrint('获取视频页面失败: ${response.statusCode}');
+          return result;
+        }
+        
+        // 从HTML中提取player_response
+        final playerResponseRegex = RegExp(r'var\s+ytInitialPlayerResponse\s*=\s*(\{.+?\});\s*var');
+        final match = playerResponseRegex.firstMatch(response.body);
+        
+        if (match == null || match.groupCount < 1) {
+          debugPrint('未找到player_response数据');
+          return result;
+        }
+        
+        String? playerResponseJson = match.group(1);
+        if (playerResponseJson == null) {
+          debugPrint('player_response数据为空');
+          return result;
+        }
+        
+        // 解析JSON
+        Map<String, dynamic> playerResponse;
+        try {
+          playerResponse = jsonDecode(playerResponseJson);
+        } catch (e) {
+          debugPrint('解析player_response失败: $e');
+          
+          // 尝试修复JSON
+          playerResponseJson = playerResponseJson
+              .replaceAll("'", '"')
+              .replaceAll(RegExp(r',\s*\}'), '}')
+              .replaceAll(RegExp(r',\s*\]'), ']');
+          
+          try {
+            playerResponse = jsonDecode(playerResponseJson);
+          } catch (e) {
+            debugPrint('修复后仍然无法解析JSON: $e');
+            return result;
+          }
+        }
+        
+        // 提取字幕轨道
+        final captions = playerResponse['captions'];
+        if (captions == null) {
+          debugPrint('未找到字幕数据');
+          return result;
+        }
+        
+        final captionTracks = captions['playerCaptionsTracklistRenderer']?['captionTracks'];
+        if (captionTracks == null || captionTracks is! List || captionTracks.isEmpty) {
+          debugPrint('未找到字幕轨道');
+          return result;
+        }
+        
+        // 为相同语言代码的轨道计数
+        final Map<String, int> languageCount = {};
+        
+        // 添加字幕轨道
+        debugPrint('从网页获取到${captionTracks.length}个字幕轨道');
+        for (final track in captionTracks) {
+          final lang = track['languageCode'] as String;
+          
+          // 更新语言计数
+          languageCount[lang] = (languageCount[lang] ?? 0) + 1;
+          final count = languageCount[lang]!;
+          
+          // 添加所有轨道，不再过滤相同语言代码
+          final name = track['name']?['simpleText'] ?? track['name']?['runs']?[0]?['text'] ?? lang;
+          final isAuto = track['kind'] == 'asr';
+          final baseUrl = track['baseUrl'] as String;
+          
+          result.add({
+            'source': 'web',
+            'languageCode': lang,
+            'languageName': name,
+            'isAutoGenerated': isAuto,
+            'name': '$name${isAuto ? " (自动生成)" : ""} ${count > 1 ? "#$count" : ""}',
+            'baseUrl': baseUrl,
+          });
+        }
+      } catch (e) {
+        debugPrint('从网页获取字幕轨道失败: $e');
+      }
+      
+      return result;
+    } catch (e) {
+      debugPrint('获取字幕轨道失败: $e');
+      return [];
+    }
+  }
+  
+  // 下载指定的字幕轨道
+  Future<String?> downloadSpecificSubtitle(String videoId, Map<String, dynamic> subtitleTrack, {Function(String)? onStatusUpdate}) async {
+    try {
+      // 获取视频信息以获取标题
+      final video = await _yt.videos.get(videoId);
+      final videoTitle = video.title;
+      
+      // 准备字幕文件路径
+      String subtitleFilename = '';
+      String subtitleFilePath = '';
+      
+      if (_configService != null && _configService!.youtubeDownloadPath.isNotEmpty) {
+        // 创建与视频相同命名格式的字幕文件名
+        String safeTitle = videoTitle.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_').replaceAll(RegExp(r'\s+'), '_');
+        String langCode = subtitleTrack['languageCode'] as String;
+        subtitleFilename = '${videoId}_${safeTitle}_${langCode}.srt';
+        subtitleFilePath = path.join(_configService!.youtubeDownloadPath, subtitleFilename);
+        
+        // 检查是否已经存在同名字幕文件
+        if (await File(subtitleFilePath).exists()) {
+          debugPrint('字幕文件已存在，直接使用: $subtitleFilePath');
+          onStatusUpdate?.call('使用已下载的字幕');
+          return subtitleFilePath;
+        }
+      } else {
+        // 使用临时目录，仍然保持命名一致性
+        final tempDir = await getTemporaryDirectory();
+        String langCode = subtitleTrack['languageCode'] as String;
+        subtitleFilename = '${videoId}_subtitle_${langCode}.srt';
+        subtitleFilePath = path.join(tempDir.path, subtitleFilename);
+      }
+      
+      onStatusUpdate?.call('下载字幕中...');
+      
+      // 根据字幕轨道的来源选择不同的下载方法
+      String? srtContent;
+      final isAutoGenerated = subtitleTrack['isAutoGenerated'] as bool? ?? false;
+      final languageCode = subtitleTrack['languageCode'] as String?;
+      
+      // 创建一个按优先级排序的下载方法列表
+      final downloadMethods = <Future<String?> Function()>[];
+      
+      if (subtitleTrack['source'] == 'official') {
+        // 优先使用官方API
+        downloadMethods.add(() async {
+          onStatusUpdate?.call('尝试从官方API获取字幕...');
+          try {
+            final track = subtitleTrack['track'];
+            
+            // 对于自动生成的字幕，直接使用直接方法
+            if (isAutoGenerated) {
+              onStatusUpdate?.call('检测到自动生成的字幕，使用直接方法...');
+              debugPrint('检测到自动生成的字幕，使用直接方法');
+              return await _getSubtitlesDirectly(videoId, preferredLanguage: languageCode);
+            } else {
+              // 对于非自动生成的字幕，使用官方API
+              final captionTrack = await _yt.videos.closedCaptions.get(track);
+              
+              if (captionTrack.captions.isEmpty) {
+                debugPrint('字幕内容为空');
+                return null;
+              }
+              
+              // 转换为SRT格式
+              final srtBuffer = StringBuffer();
+              for (var i = 0; i < captionTrack.captions.length; i++) {
+                final caption = captionTrack.captions[i];
+                
+                // 索引编号
+                srtBuffer.writeln(i + 1);
+                
+                // 时间格式
+                final start = _formatTimestamp(Duration(milliseconds: caption.offset.inMilliseconds));
+                final end = _formatTimestamp(Duration(milliseconds: caption.offset.inMilliseconds + caption.duration.inMilliseconds));
+                srtBuffer.writeln('$start --> $end');
+                
+                // 字幕文本
+                srtBuffer.writeln(caption.text);
+                srtBuffer.writeln();
+              }
+              
+              return srtBuffer.toString();
+            }
+          } catch (e) {
+            debugPrint('从官方API获取字幕失败: $e');
+            return null;
+          }
+        });
+      } else if (subtitleTrack['source'] == 'web') {
+        // 从网页获取字幕
+        downloadMethods.add(() async {
+          onStatusUpdate?.call('尝试从网页获取字幕...');
+          try {
+            final baseUrl = subtitleTrack['baseUrl'] as String;
+            
+            // 添加格式参数，获取WebVTT格式
+            final vttUrl = '$baseUrl&fmt=vtt';
+            debugPrint('WebVTT字幕URL: $vttUrl');
+            onStatusUpdate?.call('正在请求字幕: $vttUrl');
+            
+            // 下载字幕内容
+            debugPrint('发送HTTP请求获取字幕...');
+            final subtitleResponse = await http.get(
+              Uri.parse(vttUrl),
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36',
+                'Cookie': 'CONSENT=YES+cb',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+                'Accept-Language': 'en-US,en;q=0.5',
+              }
+            );
+            
+            debugPrint('HTTP响应状态码: ${subtitleResponse.statusCode}');
+            debugPrint('HTTP响应头: ${subtitleResponse.headers}');
+            
+            if (subtitleResponse.statusCode != 200) {
+              debugPrint('获取字幕内容失败: ${subtitleResponse.statusCode}');
+              debugPrint('响应内容: ${subtitleResponse.body.substring(0, min(500, subtitleResponse.body.length))}');
+              onStatusUpdate?.call('字幕请求失败: ${subtitleResponse.statusCode}');
+              return null;
+            }
+            
+            final vttContent = subtitleResponse.body;
+            if (vttContent.isEmpty) {
+              debugPrint('字幕内容为空');
+              onStatusUpdate?.call('获取到的字幕内容为空');
+              return null;
+            }
+            
+            debugPrint('成功获取字幕内容，长度: ${vttContent.length}字节');
+            debugPrint('字幕内容预览: ${vttContent.substring(0, min(500, vttContent.length))}');
+            onStatusUpdate?.call('成功获取字幕，正在转换格式...');
+            
+            // 转换为SRT格式
+            return _convertVttToSrt(vttContent);
+          } catch (e, stackTrace) {
+            debugPrint('从网页获取字幕失败: $e');
+            debugPrint('错误堆栈: $stackTrace');
+            onStatusUpdate?.call('字幕下载出错: $e');
+            return null;
+          }
+        });
+      }
+      
+      // 添加备用方法
+      downloadMethods.add(() async {
+        onStatusUpdate?.call('尝试备用方法获取字幕...');
+        return await _getSubtitlesFromHttpApi(videoId, langCode: languageCode);
+      });
+      
+      // 添加timedtext API方法
+      downloadMethods.add(() async {
+        onStatusUpdate?.call('尝试使用timedtext API获取字幕...');
+        return await _getSubtitlesUsingTimedTextAPI(videoId, languageCode);
+      });
+      
+      // 添加新的直接API方法
+      downloadMethods.add(() async {
+        onStatusUpdate?.call('尝试使用新的API方法获取字幕...');
+        return await _getSubtitlesUsingNewAPI(videoId, languageCode);
+      });
+      
+      // 添加直接方法作为最后的备用
+      downloadMethods.add(() async {
+        onStatusUpdate?.call('尝试直接方法获取字幕...');
+        return await _getSubtitlesDirectly(videoId, preferredLanguage: languageCode);
+      });
+      
+      // 依次尝试所有下载方法
+      for (final method in downloadMethods) {
+        srtContent = await method();
+        if (srtContent != null && srtContent.isNotEmpty) {
+          debugPrint('成功获取字幕内容');
+          break;
+        }
+      }
+      
+      // 如果获取字幕失败，尝试处理可能的XML解析错误
+      if (srtContent == null || srtContent.isEmpty) {
+        debugPrint('常规方法获取字幕失败，尝试处理可能的XML解析错误');
+        srtContent = await _handleXmlParseError(videoId, languageCode, onStatusUpdate);
+      }
+      
+      // 如果获取字幕失败
+      if (srtContent == null || srtContent.isEmpty) {
+        debugPrint('所有方法都无法获取字幕内容');
+        onStatusUpdate?.call('无法获取字幕内容');
+        return null;
+      }
+      
+      // 在保存前清理字幕内容中的特殊标签
+      srtContent = _cleanYouTubeSpecificContent(srtContent);
+      
+      // 确保目录存在
+      final directory = path.dirname(subtitleFilePath);
+      if (!Directory(directory).existsSync()) {
+        await Directory(directory).create(recursive: true);
+      }
+      
+      // 保存字幕文件
+      final file = File(subtitleFilePath);
+      await file.writeAsString(srtContent);
+      
+      // 验证字幕文件
+      final subtitleExists = await file.exists();
+      final subtitleSize = subtitleExists ? await file.length() : 0;
+      
+      if (subtitleExists && subtitleSize > 0) {
+        debugPrint('字幕下载成功: $subtitleFilePath (${subtitleSize}字节)');
+        onStatusUpdate?.call('字幕下载完成');
+        
+        // 将字幕文件添加到缓存
+        if (_downloadCache.containsKey(videoId)) {
+          _downloadCache[videoId]!['subtitleFilename'] = path.basename(subtitleFilePath);
+          await _saveCache();
+        }
+        
+        return subtitleFilePath;
+      } else {
+        debugPrint('字幕文件保存失败');
+        onStatusUpdate?.call('字幕文件保存失败');
+        return null;
+      }
+    } catch (e, stack) {
+      debugPrint('下载字幕异常: $e');
+      debugPrint('堆栈: $stack');
+      onStatusUpdate?.call('下载字幕错误');
+      return null;
+    }
+  }
+  
+  // 处理XML解析错误
+  Future<String?> _handleXmlParseError(String videoId, String? languageCode, Function(String)? onStatusUpdate) async {
+    debugPrint('处理XML解析错误，尝试使用备用方法获取字幕');
+    onStatusUpdate?.call('XML解析错误，尝试备用方法...');
+    
+    try {
+      // 首先尝试使用HTTP API
+      String? srtContent = await _getSubtitlesFromHttpApi(videoId, langCode: languageCode);
+      
+      // 如果失败，尝试直接方法
+      if (srtContent == null || srtContent.isEmpty) {
+        debugPrint('HTTP API获取字幕失败，尝试直接方法');
+        onStatusUpdate?.call('尝试直接获取字幕...');
+        
+        // 使用不同的User-Agent尝试
+        final userAgents = [
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36',
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Safari/605.1.15',
+          'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.45 Safari/537.36'
+        ];
+        
+        // 尝试不同的User-Agent
+        for (final userAgent in userAgents) {
+          try {
+            debugPrint('尝试使用User-Agent: $userAgent');
+            
+            // 获取视频页面
+            final response = await http.get(
+              Uri.parse('https://www.youtube.com/watch?v=$videoId'),
+              headers: {
+                'User-Agent': userAgent,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-us,en;q=0.5',
+                'Cookie': 'CONSENT=YES+cb',
+              }
+            );
+            
+            if (response.statusCode != 200) {
+              debugPrint('获取视频页面失败: ${response.statusCode}');
+              continue;
+            }
+            
+            // 从HTML中提取字幕URL
+            final captionUrlRegex = RegExp(r'"captionTracks":\s*\[\s*\{\s*"baseUrl":\s*"([^"]+)"');
+            final match = captionUrlRegex.firstMatch(response.body);
+            
+            if (match == null || match.groupCount < 1) {
+              debugPrint('未找到字幕URL');
+              continue;
+            }
+            
+            String? captionUrl = match.group(1);
+            if (captionUrl == null) {
+              debugPrint('字幕URL为空');
+              continue;
+            }
+            
+            // 解码URL
+            captionUrl = captionUrl.replaceAll(r'\u0026', '&');
+            debugPrint('找到字幕URL: $captionUrl');
+            
+            // 添加格式参数，获取WebVTT格式
+            if (!captionUrl.contains('fmt=')) {
+              captionUrl += '&fmt=vtt';
+            }
+            
+            // 下载字幕内容
+            final subtitleResponse = await http.get(Uri.parse(captionUrl));
+            if (subtitleResponse.statusCode != 200) {
+              debugPrint('获取字幕内容失败: ${subtitleResponse.statusCode}');
+              continue;
+            }
+            
+            final vttContent = subtitleResponse.body;
+            if (vttContent.isEmpty) {
+              debugPrint('字幕内容为空');
+              continue;
+            }
+            
+            // 转换为SRT格式
+            srtContent = _convertVttToSrt(vttContent);
+            if (srtContent != null && srtContent.isNotEmpty) {
+              debugPrint('成功获取字幕内容');
+              break;
+            }
+          } catch (e) {
+            debugPrint('使用User-Agent $userAgent 获取字幕失败: $e');
           }
         }
       }
       
-      final result = srtContent.toString().trim();
-      if (result.isEmpty || subtitleIndex <= 1) {
-        debugPrint('未能提取出任何字幕内容');
+      return srtContent;
+    } catch (e) {
+      debugPrint('处理XML解析错误失败: $e');
+      return null;
+    }
+  }
+  
+  // 使用YouTube timedtext API获取字幕
+  Future<String?> _getSubtitlesUsingTimedTextAPI(String videoId, String? languageCode) async {
+    try {
+      debugPrint('尝试使用timedtext API获取字幕，视频ID: $videoId，语言: ${languageCode ?? "默认"}');
+      
+      // 构建请求URL - 首先尝试指定语言
+      String timedTextUrl = 'https://www.youtube.com/api/timedtext?v=$videoId&lang=${languageCode ?? "en"}';
+      debugPrint('请求URL: $timedTextUrl');
+      
+      // 发送请求
+      var response = await http.get(
+        Uri.parse(timedTextUrl),
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        }
+      );
+      
+      debugPrint('timedtext API响应状态码: ${response.statusCode}');
+      
+      // 如果第一次请求失败，尝试不指定语言
+      if (response.statusCode != 200 || response.body.isEmpty || !response.body.contains('<text')) {
+        debugPrint('第一次请求失败或返回内容为空，尝试不指定语言');
+        
+        timedTextUrl = 'https://www.youtube.com/api/timedtext?v=$videoId';
+        debugPrint('新请求URL: $timedTextUrl');
+        
+        response = await http.get(
+          Uri.parse(timedTextUrl),
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          }
+        );
+        
+        debugPrint('第二次请求状态码: ${response.statusCode}');
+      }
+      
+      // 如果第二次请求也失败，尝试添加更多参数
+      if (response.statusCode != 200 || response.body.isEmpty || !response.body.contains('<text')) {
+        debugPrint('第二次请求失败或返回内容为空，尝试添加更多参数');
+        
+        timedTextUrl = 'https://www.youtube.com/api/timedtext?v=$videoId&lang=${languageCode ?? "en"}&fmt=srv1&xorb=2&xobt=3&xovt=3';
+        debugPrint('第三次请求URL: $timedTextUrl');
+        
+        response = await http.get(
+          Uri.parse(timedTextUrl),
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          }
+        );
+        
+        debugPrint('第三次请求状态码: ${response.statusCode}');
+      }
+      
+      if (response.statusCode != 200) {
+        debugPrint('所有timedtext API请求都失败: ${response.statusCode}');
         return null;
       }
       
-      debugPrint('成功从WebVTT格式提取${subtitleIndex - 1}条字幕');
-      return result;
-    } catch (e) {
-      debugPrint('转换WebVTT到SRT出错: $e');
+      final xmlContent = response.body;
+      if (xmlContent.isEmpty) {
+        debugPrint('timedtext API返回内容为空');
+        return null;
+      }
+      
+      debugPrint('timedtext API返回内容长度: ${xmlContent.length}字节');
+      debugPrint('timedtext API返回内容预览: ${xmlContent.substring(0, min(200, xmlContent.length))}');
+      
+      // 如果返回的是XML格式的字幕，需要解析并转换为SRT格式
+      if (xmlContent.contains('<transcript>') || xmlContent.contains('<text ')) {
+        debugPrint('检测到XML格式字幕，开始解析...');
+        return _parseXmlSubtitles(xmlContent);
+      } else {
+        debugPrint('API返回内容不是XML格式，无法解析');
+        return null;
+      }
+    } catch (e, stack) {
+      debugPrint('使用timedtext API获取字幕失败: $e');
+      debugPrint('错误堆栈: $stack');
+      return null;
+    }
+  }
+  
+  // 解析XML格式的字幕
+  String? _parseXmlSubtitles(String xmlContent) {
+    try {
+      debugPrint('开始解析XML格式字幕');
+      
+      // 使用正则表达式提取字幕文本和时间信息
+      final textRegex = RegExp(r'<text start="([^"]+)" dur="([^"]+)"[^>]*>(.*?)</text>', dotAll: true);
+      final matches = textRegex.allMatches(xmlContent);
+      
+      if (matches.isEmpty) {
+        debugPrint('未找到字幕文本');
+        return null;
+      }
+      
+      debugPrint('找到${matches.length}条字幕');
+      
+      // 构建SRT格式字幕
+      final srtBuffer = StringBuffer();
+      int index = 1;
+      
+      for (final match in matches) {
+        if (match.groupCount >= 3) {
+          // 获取开始时间和持续时间
+          final startSeconds = double.tryParse(match.group(1) ?? '0') ?? 0;
+          final durationSeconds = double.tryParse(match.group(2) ?? '0') ?? 0;
+          final endSeconds = startSeconds + durationSeconds;
+          
+          // 转换为SRT时间格式
+          final startTime = _secondsToSrtTime(startSeconds);
+          final endTime = _secondsToSrtTime(endSeconds);
+          
+          // 获取字幕文本并解码HTML实体
+          String text = match.group(3) ?? '';
+          text = _decodeHtmlEntities(text);
+          
+          // 写入SRT格式
+          srtBuffer.writeln(index);
+          srtBuffer.writeln('$startTime --> $endTime');
+          srtBuffer.writeln(text);
+          srtBuffer.writeln();
+          
+          index++;
+        }
+      }
+      
+      final srtContent = srtBuffer.toString();
+      debugPrint('XML解析完成，生成了${index-1}条SRT格式字幕');
+      
+      return srtContent.isNotEmpty ? srtContent : null;
+    } catch (e, stack) {
+      debugPrint('解析XML字幕失败: $e');
+      debugPrint('错误堆栈: $stack');
+      return null;
+    }
+  }
+  
+  // 将秒数转换为SRT时间格式
+  String _secondsToSrtTime(double seconds) {
+    final int hours = (seconds / 3600).floor();
+    final int minutes = ((seconds % 3600) / 60).floor();
+    final int secs = (seconds % 60).floor();
+    final int milliseconds = ((seconds - seconds.floor()) * 1000).round();
+    
+    return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')},${milliseconds.toString().padLeft(3, '0')}';
+  }
+  
+  // 解码HTML实体
+  String _decodeHtmlEntities(String text) {
+    return text
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll('<br />', '\n')
+        .replaceAll('<br/>', '\n')
+        .replaceAll('<br>', '\n');
+  }
+  
+  // 使用新的API方法获取字幕
+  Future<String?> _getSubtitlesUsingNewAPI(String videoId, String? languageCode) async {
+    try {
+      debugPrint('尝试使用新的API方法获取字幕，视频ID: $videoId，语言: ${languageCode ?? "默认"}');
+      
+      // 构建请求URL - 使用新的API格式
+      final apiUrl = 'https://www.youtube.com/youtubei/v1/get_transcript?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
+      debugPrint('请求URL: $apiUrl');
+      
+      // 构建请求体
+      final requestBody = {
+        'context': {
+          'client': {
+            'clientName': 'WEB',
+            'clientVersion': '2.20220805.00.00',
+          }
+        },
+        'params': base64Encode(utf8.encode('${{"videoId":"$videoId"}}')),
+      };
+      
+      // 发送POST请求
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36',
+          'Content-Type': 'application/json',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+        body: jsonEncode(requestBody),
+      );
+      
+      debugPrint('新API响应状态码: ${response.statusCode}');
+      
+      if (response.statusCode != 200) {
+        debugPrint('新API请求失败: ${response.statusCode}');
+        return null;
+      }
+      
+      final responseData = jsonDecode(response.body);
+      debugPrint('新API响应数据: ${jsonEncode(responseData).substring(0, min(500, jsonEncode(responseData).length))}');
+      
+      // 解析字幕数据
+      final actions = responseData['actions'];
+      if (actions == null || actions is! List || actions.isEmpty) {
+        debugPrint('未找到actions数据');
+        return null;
+      }
+      
+      // 尝试从不同的数据结构中提取字幕
+      List<dynamic>? cues;
+      
+      // 遍历actions寻找字幕数据
+      for (final action in actions) {
+        if (action['updateEngagementPanelAction'] != null) {
+          final content = action['updateEngagementPanelAction']['content'];
+          if (content != null && content['transcriptRenderer'] != null) {
+            final transcriptRenderer = content['transcriptRenderer'];
+            if (transcriptRenderer['body'] != null) {
+              final body = transcriptRenderer['body'];
+              if (body['transcriptBodyRenderer'] != null) {
+                final transcriptBodyRenderer = body['transcriptBodyRenderer'];
+                if (transcriptBodyRenderer['cueGroups'] != null) {
+                  final cueGroups = transcriptBodyRenderer['cueGroups'];
+                  if (cueGroups is List && cueGroups.isNotEmpty) {
+                    // 提取所有cues
+                    final allCues = <dynamic>[];
+                    for (final group in cueGroups) {
+                      if (group['transcriptCueGroupRenderer'] != null) {
+                        final renderer = group['transcriptCueGroupRenderer'];
+                        if (renderer['cues'] != null && renderer['cues'] is List) {
+                          allCues.addAll(renderer['cues']);
+                        }
+                      }
+                    }
+                    if (allCues.isNotEmpty) {
+                      cues = allCues;
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      if (cues == null || cues.isEmpty) {
+        debugPrint('未找到字幕cues数据');
+        return null;
+      }
+      
+      debugPrint('找到${cues.length}条字幕');
+      
+      // 构建SRT格式字幕
+      final srtBuffer = StringBuffer();
+      int index = 1;
+      
+      for (final cue in cues) {
+        if (cue['transcriptCueRenderer'] != null) {
+          final renderer = cue['transcriptCueRenderer'];
+          
+          // 获取开始时间（毫秒）
+          final startMs = int.tryParse(renderer['startMs'] ?? '0') ?? 0;
+          final durationMs = int.tryParse(renderer['durationMs'] ?? '0') ?? 0;
+          final endMs = startMs + durationMs;
+          
+          // 获取文本
+          String text = '';
+          if (renderer['cue'] != null && renderer['cue']['simpleText'] != null) {
+            text = renderer['cue']['simpleText'];
+          } else if (renderer['cue'] != null && renderer['cue']['runs'] != null) {
+            final runs = renderer['cue']['runs'];
+            if (runs is List) {
+              final textParts = <String>[];
+              for (final run in runs) {
+                if (run['text'] != null) {
+                  textParts.add(run['text']);
+                }
+              }
+              text = textParts.join('');
+            }
+          }
+          
+          if (text.isNotEmpty) {
+            // 写入SRT格式
+            srtBuffer.writeln(index);
+            
+            // 转换时间格式
+            final startTime = _millisecondsToTimestamp(startMs);
+            final endTime = _millisecondsToTimestamp(endMs);
+            srtBuffer.writeln('$startTime --> $endTime');
+            
+            // 写入文本
+            srtBuffer.writeln(text);
+            srtBuffer.writeln();
+            
+            index++;
+          }
+        }
+      }
+      
+      final srtContent = srtBuffer.toString();
+      debugPrint('新API解析完成，生成了${index-1}条SRT格式字幕');
+      
+      return srtContent.isNotEmpty ? srtContent : null;
+    } catch (e, stack) {
+      debugPrint('使用新的API方法获取字幕失败: $e');
+      debugPrint('错误堆栈: $stack');
       return null;
     }
   }

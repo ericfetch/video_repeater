@@ -843,7 +843,8 @@ class VideoService extends ChangeNotifier {
             }
             
             notifyListeners();
-          }
+          },
+          downloadInfoService: _downloadInfoService,
         );
         
         retryCount++;
@@ -1869,5 +1870,38 @@ class VideoService extends ChangeNotifier {
     }
     
     return _currentSubtitle;
+  }
+  
+  // 下载选中的字幕轨道
+  Future<void> downloadSelectedSubtitle(String videoId, Map<String, dynamic> subtitleTrack) async {
+    if (_downloadInfoService == null) {
+      debugPrint('下载信息服务为空，无法下载字幕');
+      return;
+    }
+    
+    // 开始下载字幕
+    _downloadInfoService!.startSubtitleDownload();
+    
+    // 下载字幕
+    final subtitlePath = await _youtubeService.downloadSpecificSubtitle(
+      videoId,
+      subtitleTrack,
+      onStatusUpdate: _downloadInfoService!.addMessage,
+    );
+    
+    // 更新下载状态
+    final success = subtitlePath != null;
+    _downloadInfoService!.subtitleDownloadComplete(success);
+    
+    // 如果下载成功，加载字幕
+    if (success) {
+      // 加载字幕
+      final loadSuccess = await loadSubtitle(subtitlePath!);
+      if (loadSuccess) {
+        _downloadInfoService!.addMessage('字幕已加载到视频');
+      } else {
+        _downloadInfoService!.addMessage('字幕加载失败');
+      }
+    }
   }
 } 

@@ -49,11 +49,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isJustResumed = false;
   Timer? _resumeDebounceTimer;
   
-  // 添加定期检查焦点的定时器
+  // 保留变量声明但不使用它进行定期检查
   Timer? _focusCheckTimer;
   
   // 添加一个标志，用于控制是否允许从历史记录加载视频
   bool _allowHistoryLoading = true;
+  
+  // 添加一个标志，用于控制是否应该自动请求焦点
+  bool _shouldAutoFocus = true;
   
   @override
   void initState() {
@@ -66,17 +69,43 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     
     // 确保焦点节点在初始化后立即获取焦点
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        FocusScope.of(context).requestFocus(_focusNode);
-        debugPrint('初始化后请求焦点');
+      if (mounted && _focusNode != null) {
+        try {
+          FocusScope.of(context).requestFocus(_focusNode);
+          debugPrint('初始化后请求焦点');
+        } catch (e) {
+          debugPrint('初始化后请求焦点出错: $e');
+        }
       }
     });
     
-    // 添加定期检查焦点的定时器
-    _focusCheckTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      if (mounted && !_focusNode.hasFocus) {
-        debugPrint('定期检查发现焦点丢失，重新请求焦点');
-        FocusScope.of(context).requestFocus(_focusNode);
+    // 添加定期检查焦点的计时器，如果焦点丢失则重新请求
+    _focusCheckTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+      if (!mounted) {
+        // 如果组件已经被销毁，取消计时器
+        timer.cancel();
+        return;
+      }
+      
+      try {
+        // 只在组件挂载且应该自动获取焦点且当前没有焦点时重新请求焦点
+        if (mounted && _shouldAutoFocus && _focusNode != null && !_focusNode.hasFocus) {
+          debugPrint('检测到焦点丢失，重新请求焦点');
+          // 使用安全的方式请求焦点
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _focusNode != null && !_focusNode.hasFocus) {
+              try {
+                FocusScope.of(context).requestFocus(_focusNode);
+              } catch (e) {
+                // 忽略错误，只记录日志
+                debugPrint('重新请求焦点时发生可忽略的错误: $e');
+              }
+            }
+          });
+        }
+      } catch (e) {
+        // 捕获并忽略所有错误，确保计时器不会因错误而停止
+        debugPrint('焦点检查时发生可忽略的错误: $e');
       }
     });
     
@@ -96,7 +125,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _focusNode.dispose();
     _hideAppBarTimer?.cancel();
     _resumeDebounceTimer?.cancel();
-    _focusCheckTimer?.cancel(); // 取消焦点检查定时器
+    _focusCheckTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -105,13 +134,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // 当应用恢复到前台时，请求焦点
     if (state == AppLifecycleState.resumed) {
-      _focusNode.requestFocus();
+      // 使用安全的方式请求焦点
+      if (mounted && _focusNode != null) {
+        try {
+          _focusNode.requestFocus();
+        } catch (e) {
+          debugPrint('应用恢复时请求焦点出错: $e');
+        }
+      }
       
       // 应用从后台切回前台时，不显示AppBar
-      setState(() {
-        _showAppBar = false;
-        _isJustResumed = true; // 标记应用刚刚恢复
-      });
+      if (mounted) {
+        setState(() {
+          _showAppBar = false;
+          _isJustResumed = true; // 标记应用刚刚恢复
+        });
+      }
       
       // 延迟重置恢复状态，防止误触发
       _resumeDebounceTimer?.cancel();
@@ -120,90 +158,127 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       });
       
       // 刷新字幕状态
-      final videoService = Provider.of<VideoService>(context, listen: false);
-      if (videoService.player != null) {
-        // 获取当前播放位置
-        final position = videoService.currentPosition;
-        
-        // 延迟一点执行，确保UI已经更新
-        Future.delayed(const Duration(milliseconds: 100), () {
-          // 小幅度前进后退，刷新字幕状态
-          videoService.seek(Duration(milliseconds: position.inMilliseconds + 10));
-          Future.delayed(const Duration(milliseconds: 50), () {
-            videoService.seek(position);
-          });
-        });
+      if (mounted) {  // 确保组件仍然挂载
+        try {
+          final videoService = Provider.of<VideoService>(context, listen: false);
+          if (videoService.player != null) {
+            // 获取当前播放位置
+            final position = videoService.currentPosition;
+            
+            // 延迟一点执行，确保UI已经更新
+            Future.delayed(const Duration(milliseconds: 100), () {
+              if (mounted) {  // 再次检查以确保安全
+                // 小幅度前进后退，刷新字幕状态
+                videoService.seek(Duration(milliseconds: position.inMilliseconds + 10));
+                Future.delayed(const Duration(milliseconds: 50), () {
+                  if (mounted) {  // 再次检查以确保安全
+                    videoService.seek(position);
+                  }
+                });
+              }
+            });
+          }
+        } catch (e) {
+          debugPrint('刷新字幕状态时出错: $e');
+        }
       }
     } else if (state == AppLifecycleState.inactive || 
                state == AppLifecycleState.paused) {
       // 当应用切换到后台时，隐藏AppBar
-      setState(() {
-        _showAppBar = false;
-      });
+      if (mounted) {
+        setState(() {
+          _showAppBar = false;
+        });
+      }
     }
   }
   
   // 当历史记录服务状态变化时
   void _onHistoryServiceChanged() {
+    // 如果组件已经被销毁，直接返回
+    if (!mounted) {
+      return;
+    }
+    
     // 如果不允许从历史记录加载视频，直接返回
     if (!_allowHistoryLoading) {
       debugPrint('历史记录服务状态变化，但当前不允许加载视频');
       return;
     }
     
-    final historyService = Provider.of<HistoryService>(context, listen: false);
-    final currentHistory = historyService.currentHistory;
-    
-    debugPrint('历史记录服务状态变化: currentHistory=${currentHistory?.videoName}');
-    debugPrint('当前视频路径: $_currentVideoPath');
-    
-    // 如果从历史记录加载了视频，更新路径但不更新标题
-    if (currentHistory != null && 
-        _currentVideoPath != currentHistory.videoPath) {
-      debugPrint('更新视频路径: ${currentHistory.videoName}');
-      _currentVideoPath = currentHistory.videoPath;
-      _currentSubtitlePath = currentHistory.subtitlePath;
+    try {
+      final historyService = Provider.of<HistoryService>(context, listen: false);
+      final currentHistory = historyService.currentHistory;
       
-      // 同时加载该视频的生词本
-      if (_currentVideoPath != null) {
-        final videoName = path.basename(_currentVideoPath!);
-        final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
-        vocabularyService.setCurrentVideo(videoName);
-        vocabularyService.loadVocabularyList(videoName);
+      debugPrint('历史记录服务状态变化: currentHistory=${currentHistory?.videoName}');
+      debugPrint('当前视频路径: $_currentVideoPath');
+      
+      // 如果从历史记录加载了视频，更新路径但不更新标题
+      if (currentHistory != null && 
+          _currentVideoPath != currentHistory.videoPath) {
+        debugPrint('更新视频路径: ${currentHistory.videoName}');
+        _currentVideoPath = currentHistory.videoPath;
+        _currentSubtitlePath = currentHistory.subtitlePath;
+        
+        // 同时加载该视频的生词本
+        if (_currentVideoPath != null && mounted) {
+          final videoName = path.basename(_currentVideoPath!);
+          final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+          vocabularyService.setCurrentVideo(videoName);
+          vocabularyService.loadVocabularyList(videoName);
+        }
+      } else if (currentHistory != null) {
+        debugPrint('历史记录变化但视频路径未变: ${currentHistory.videoName}');
       }
-    } else if (currentHistory != null) {
-      debugPrint('历史记录变化但视频路径未变: ${currentHistory.videoName}');
+    } catch (e) {
+      debugPrint('处理历史记录变化时出错: $e');
     }
   }
   
   // 保存当前进度到历史记录
   void _saveCurrentProgress() {
-    final videoService = Provider.of<VideoService>(context, listen: false);
-    final historyService = Provider.of<HistoryService>(context, listen: false);
+    if (!mounted) {
+      return;
+    }
     
-    if (_currentVideoPath != null && 
-        _currentSubtitlePath != null && 
-        videoService.player != null) {
+    try {
+      final videoService = Provider.of<VideoService>(context, listen: false);
+      final historyService = Provider.of<HistoryService>(context, listen: false);
       
-      final videoName = path.basename(_currentVideoPath!);
-      final position = videoService.currentPosition;
-      
-      final history = VideoHistory(
-        videoPath: _currentVideoPath!,
-        subtitlePath: _currentSubtitlePath!,
-        videoName: videoName,
-        lastPosition: position,
-        timestamp: DateTime.now(),
-      );
-      
-      historyService.addHistory(history);
+      if (_currentVideoPath != null && 
+          _currentSubtitlePath != null && 
+          videoService.player != null) {
+        
+        final videoName = path.basename(_currentVideoPath!);
+        final position = videoService.currentPosition;
+        
+        final history = VideoHistory(
+          videoPath: _currentVideoPath!,
+          subtitlePath: _currentSubtitlePath!,
+          videoName: videoName,
+          lastPosition: position,
+          timestamp: DateTime.now(),
+        );
+        
+        historyService.addHistory(history);
+      }
+    } catch (e) {
+      debugPrint('保存播放进度时出错: $e');
     }
   }
   
   // 显示提示消息 (公开方法，供其他组件调用)
   void _showSnackBar(String message) {
-    final messageService = Provider.of<MessageService>(context, listen: false);
-    messageService.showMessage(message);
+    if (!mounted) {
+      return;
+    }
+    
+    try {
+      final messageService = Provider.of<MessageService>(context, listen: false);
+      messageService.showMessage(message);
+    } catch (e) {
+      debugPrint('显示提示消息时出错: $e');
+    }
   }
   
   // 提取播放状态切换逻辑到单独方法
@@ -287,13 +362,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 }
                 return KeyEventResult.handled;
               } else if (event.logicalKey == LogicalKeyboardKey.keyL) {
-                final videoService = Provider.of<VideoService>(context, listen: false);
+                debugPrint('L键按下，切换循环模式');
                 videoService.toggleLooping();
-                
-                final messageService = Provider.of<MessageService>(context, listen: false);
-                messageService.showMessage(
-                  videoService.isLooping ? '开始循环' : '停止循环'
-                );
+                _showSnackBar(videoService.isLooping ? '开始循环' : '停止循环');
                 return KeyEventResult.handled;
               }
             }
@@ -322,6 +393,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             icon: const Icon(Icons.close),
                             onPressed: () {
                               Navigator.pop(context);
+                              // 使用Future.microtask延迟恢复自动焦点
+                              Future.microtask(() {
+                                if (mounted) {
+                                  setState(() {
+                                    _shouldAutoFocus = true;
+                                  });
+                                }
+                              });
                             },
                           ),
                         ],
@@ -471,12 +550,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                           size: 24,
                                         ),
                                         const SizedBox(width: 8),
-                                        Text(
-                                          videoService.videoTitle,
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 18,
-                                            fontWeight: FontWeight.bold,
+                                        Container(
+                                          constraints: const BoxConstraints(maxWidth: 500),
+                                          child: Text(
+                                            videoService.videoTitle,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
                                           ),
                                         ),
                                       ],
@@ -489,8 +573,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     tooltip: '设置',
                                     onPressed: () {
                                       _navigateToConfigScreen(context);
-                                      // 操作完成后重新获取主焦点
-                                      _focusNode.requestFocus();
                                     },
                                   ),
                                   // 选择视频按钮
@@ -514,8 +596,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                           vocabularyService.loadVocabularyList(videoName);
                                         }
                                       }
-                                      // 操作完成后重新获取主焦点
-                                      _focusNode.requestFocus();
                                     },
                                   ),
                                   // 选择字幕按钮
@@ -538,8 +618,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                           _showSnackBar('字幕加载成功');
                                         }
                                       }
-                                      // 操作完成后重新获取主焦点
-                                      _focusNode.requestFocus();
                                     },
                                   ),
                                   // 帮助按钮
@@ -548,8 +626,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     tooltip: '帮助',
                                     onPressed: () {
                                       _showHelpDialog(context);
-                                      // 操作完成后重新获取主焦点
-                                      _focusNode.requestFocus();
                                     },
                                   ),
                                   // 保存进度按钮
@@ -559,8 +635,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     onPressed: () {
                                       _saveCurrentProgress();
                                       _showSnackBar('已保存当前进度');
-                                      // 操作完成后重新获取主焦点
-                                      _focusNode.requestFocus();
                                     },
                                   ),
                                   // 历史记录按钮
@@ -570,10 +644,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     onPressed: () {
                                       setState(() {
                                         _showVocabulary = false;
+                                        _shouldAutoFocus = false; // 禁用自动焦点
                                       });
                                       _scaffoldKey.currentState?.openEndDrawer();
-                                      // 操作完成后重新获取主焦点
-                                      _focusNode.requestFocus();
                                     },
                                   ),
                                   // 生词本按钮
@@ -583,10 +656,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     onPressed: () {
                                       setState(() {
                                         _showVocabulary = true;
+                                        _shouldAutoFocus = false; // 禁用自动焦点
                                       });
                                       _scaffoldKey.currentState?.openEndDrawer();
-                                      // 操作完成后重新获取主焦点
-                                      _focusNode.requestFocus();
                                     },
                                   ),
                                   // YouTube按钮
@@ -595,8 +667,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     tooltip: '打开YouTube视频',
                                     onPressed: () {
                                       _showYouTubeUrlDialog(context);
-                                      // 操作完成后重新获取主焦点
-                                      _focusNode.requestFocus();
                                     },
                                   ),
                                   const SizedBox(width: 8),
@@ -619,6 +689,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   
   // 显示键盘快捷键帮助对话框
   void _showHelpDialog(BuildContext context) {
+    // 禁用自动焦点
+    setState(() {
+      _shouldAutoFocus = false;
+    });
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -664,7 +739,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ],
       ),
-    );
+    ).then((_) {
+      // 使用Future.microtask延迟恢复自动焦点
+      Future.microtask(() {
+        if (mounted && _focusNode != null) {
+          setState(() {
+            _shouldAutoFocus = true;
+          });
+          
+          // 对话框关闭后，重新请求主界面焦点
+          try {
+            FocusScope.of(context).requestFocus(_focusNode);
+          } catch (e) {
+            debugPrint('对话框关闭后请求焦点出错: $e');
+          }
+        }
+      });
+    });
   }
   
   // 加载历史记录
@@ -922,6 +1013,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // 在打开设置页面前禁用历史记录加载
     _allowHistoryLoading = false;
     
+    // 禁用自动焦点
+    setState(() {
+      _shouldAutoFocus = false;
+    });
+    
     // 使用await等待设置页面关闭
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (context) => const ConfigScreen()),
@@ -929,7 +1025,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     
     // 设置页面关闭后，重新获取焦点，但不重新加载视频
     if (mounted) {
-      _focusNode.requestFocus();
+      // 使用Future.microtask延迟恢复自动焦点
+      Future.microtask(() {
+        if (mounted && _focusNode != null) {
+          setState(() {
+            _shouldAutoFocus = true;
+          });
+          
+          try {
+            _focusNode.requestFocus();
+          } catch (e) {
+            debugPrint('设置页面关闭后请求焦点出错: $e');
+          }
+        }
+      });
       
       // 延迟一段时间后再允许历史记录加载，确保不会立即触发
       Future.delayed(const Duration(milliseconds: 500), () {
@@ -942,37 +1051,66 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _showYouTubeUrlDialog(BuildContext context) {
     final TextEditingController urlController = TextEditingController();
     
+    // 创建一个专用的焦点节点，用于输入框
+    final inputFocusNode = FocusNode();
+    
+    // 禁用自动焦点
+    setState(() {
+      _shouldAutoFocus = false;
+    });
+    
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      barrierDismissible: true,
+      builder: (dialogContext) => AlertDialog(
         title: const Text('输入YouTube视频链接'),
         content: TextField(
           controller: urlController,
+          focusNode: inputFocusNode,
           decoration: const InputDecoration(
             hintText: 'https://www.youtube.com/watch?v=...',
             labelText: 'YouTube URL',
           ),
           autofocus: true,
           onSubmitted: (value) {
-            Navigator.of(context).pop();
+            Navigator.of(dialogContext).pop();
             _loadYouTubeVideo(value);
           },
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('取消'),
           ),
           TextButton(
             onPressed: () {
-              Navigator.of(context).pop();
+              Navigator.of(dialogContext).pop();
               _loadYouTubeVideo(urlController.text);
             },
             child: const Text('确定'),
           ),
         ],
       ),
-    );
+    ).then((_) {
+      // 对话框关闭后，释放焦点节点
+      inputFocusNode.dispose();
+      
+      // 使用Future.microtask延迟恢复自动焦点
+      Future.microtask(() {
+        if (mounted && _focusNode != null) {
+          setState(() {
+            _shouldAutoFocus = true;
+          });
+          
+          // 对话框关闭后，重新请求主界面焦点
+          try {
+            FocusScope.of(context).requestFocus(_focusNode);
+          } catch (e) {
+            debugPrint('YouTube对话框关闭后请求焦点出错: $e');
+          }
+        }
+      });
+    });
   }
   
   // 加载YouTube视频
@@ -1063,15 +1201,6 @@ class _SafeIconButton extends StatelessWidget {
       onPressed: () {
         // 执行点击操作
         onPressed();
-        
-        // 确保点击后将焦点返回给主界面
-        final homeScreenState = context.findAncestorStateOfType<_HomeScreenState>();
-        if (homeScreenState != null) {
-          Future.microtask(() {
-            FocusScope.of(context).requestFocus(homeScreenState._focusNode);
-            debugPrint('按钮点击后重新请求主界面焦点');
-          });
-        }
       },
     );
   }

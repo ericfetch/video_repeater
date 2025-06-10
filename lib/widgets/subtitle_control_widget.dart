@@ -530,7 +530,7 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                     builder: (context, configService, child) {
                       return Container(
                         margin: const EdgeInsets.symmetric(horizontal: 4.0),
-                        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
                         decoration: BoxDecoration(
                           color: configService.subtitleBackgroundColor,
                           borderRadius: BorderRadius.circular(4.0),
@@ -567,39 +567,42 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                             
                             // 字幕文本 - 使用带右键菜单的文本区域
                             Expanded(
-                              child: currentSubtitle != null
-                                ? SubtitleSelectionArea(
-                                    subtitle: SubtitleEntry(
-                                      index: currentSubtitle.index,
-                                      start: currentSubtitle.start,
-                                      end: currentSubtitle.end,
-                                      text: _cleanSubtitleText(currentSubtitle.text), // 直接在这里清理文本
-                                    ),
-                                    onSaveWord: (word) {
-                                      vocabularyService.addWordToVocabulary(
-                                        word, 
-                                        currentSubtitle.text,
-                                        videoService.currentVideoPath ?? ''
-                                      );
-                                      final messageService = Provider.of<MessageService>(context, listen: false);
-                                      messageService.showMessage('已添加到生词本: $word');
-                                    },
-                                    isBlurred: _isSubtitleBlurred,
-                                    fontSize: configService.subtitleFontSize,
-                                    fontWeight: configService.subtitleFontWeight,
-                                    textColor: configService.subtitleColor,
-                                  )
-                                : Center(
-                                    child: Text(
-                                      passedSubtitles > 0 
-                                        ? '已播放 $passedSubtitles 条字幕'
-                                        : '等待字幕...',
-                                      style: const TextStyle(
-                                        color: Colors.grey,
-                                        fontStyle: FontStyle.italic,
+                              child: Container(
+                                alignment: Alignment.centerLeft, // 垂直居中，水平左对齐
+                                child: currentSubtitle != null
+                                  ? SubtitleSelectionArea(
+                                      subtitle: SubtitleEntry(
+                                        index: currentSubtitle.index,
+                                        start: currentSubtitle.start,
+                                        end: currentSubtitle.end,
+                                        text: _cleanSubtitleText(currentSubtitle.text), // 直接在这里清理文本
+                                      ),
+                                      onSaveWord: (word) {
+                                        vocabularyService.addWordToVocabulary(
+                                          word, 
+                                          currentSubtitle.text,
+                                          videoService.currentVideoPath ?? ''
+                                        );
+                                        final messageService = Provider.of<MessageService>(context, listen: false);
+                                        messageService.showMessage('已添加到生词本: $word');
+                                      },
+                                      isBlurred: _isSubtitleBlurred,
+                                      fontSize: configService.subtitleFontSize,
+                                      fontWeight: configService.subtitleFontWeight,
+                                      textColor: configService.subtitleColor,
+                                    )
+                                  : Center(
+                                      child: Text(
+                                        passedSubtitles > 0 
+                                          ? '已播放 $passedSubtitles 条字幕'
+                                          : '等待字幕...',
+                                        style: const TextStyle(
+                                          color: Colors.grey,
+                                          fontStyle: FontStyle.italic,
+                                        ),
                                       ),
                                     ),
-                                  ),
+                              ),
                             ),
                           ],
                         ),
