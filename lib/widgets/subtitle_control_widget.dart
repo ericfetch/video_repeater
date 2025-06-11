@@ -6,6 +6,7 @@ import '../services/message_service.dart';
 import '../services/config_service.dart';
 import '../models/subtitle_model.dart';
 import 'subtitle_selection_area.dart';
+import 'package:path/path.dart' as path;
 
 class SubtitleControlWidget extends StatefulWidget {
   final VideoService? videoService;
@@ -44,11 +45,15 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
     super.initState();
     // 延迟初始化，确保Provider已经准备好
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _initializeValues();
+      if (mounted) {
+        _initializeValues();
+      }
     });
   }
   
   void _initializeValues() {
+    if (!mounted) return;
+    
     final videoService = widget.videoService ?? Provider.of<VideoService>(context, listen: false);
     final configService = Provider.of<ConfigService>(context, listen: false);
     final player = videoService.player;
@@ -95,6 +100,36 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
     // 完全移除换行符
     text = text.replaceAll('\n', '');
     return text;
+  }
+  
+  // 添加单词到生词本
+  void _addToVocabulary(BuildContext context, String word) {
+    if (word.isEmpty) return;
+    
+    // 获取视频服务
+    final videoService = widget.videoService ?? Provider.of<VideoService>(context, listen: false);
+    
+    // 获取当前字幕文本
+    final currentSubtitle = videoService.currentSubtitle;
+    if (currentSubtitle == null) return;
+    
+    // 获取生词本服务
+    final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+    
+    // 添加单词到生词本
+    vocabularyService.addWordToVocabulary(
+      word, 
+      _cleanSubtitleText(currentSubtitle.text),
+      videoService.currentVideoPath,
+    );
+    
+    // 显示提示
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已添加 "$word" 到生词本'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
   
   @override
@@ -578,13 +613,7 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                                         text: _cleanSubtitleText(currentSubtitle.text), // 直接在这里清理文本
                                       ),
                                       onSaveWord: (word) {
-                                        vocabularyService.addWordToVocabulary(
-                                          word, 
-                                          currentSubtitle.text,
-                                          videoService.currentVideoPath ?? ''
-                                        );
-                                        final messageService = Provider.of<MessageService>(context, listen: false);
-                                        messageService.showMessage('已添加到生词本: $word');
+                                        _addToVocabulary(context, word);
                                       },
                                       isBlurred: _isSubtitleBlurred,
                                       fontSize: configService.subtitleFontSize,

@@ -1,0 +1,208 @@
+import 'package:stemmer/stemmer.dart';
+
+/// 词形还原工具类，用于将单词还原为基本形式
+class WordLemmatizer {
+  static final PorterStemmer _stemmer = PorterStemmer();
+  
+  // 常见的不规则动词过去式和过去分词映射
+  static final Map<String, String> _irregularVerbs = {
+    'was': 'be',
+    'were': 'be',
+    'been': 'be',
+    'had': 'have',
+    'has': 'have',
+    'did': 'do',
+    'done': 'do',
+    'went': 'go',
+    'gone': 'go',
+    'made': 'make',
+    'said': 'say',
+    'took': 'take',
+    'taken': 'take',
+    'came': 'come',
+    'saw': 'see',
+    'seen': 'see',
+    'knew': 'know',
+    'known': 'know',
+    'got': 'get',
+    'gotten': 'get',
+    'gave': 'give',
+    'given': 'give',
+    'found': 'find',
+    'thought': 'think',
+    'told': 'tell',
+    'became': 'become',
+    'shown': 'show',
+    'showed': 'show',
+    'left': 'leave',
+    'felt': 'feel',
+    'brought': 'bring',
+    'bought': 'buy',
+    'meant': 'mean',
+    'sent': 'send',
+    'paid': 'pay',
+    'built': 'build',
+    'understood': 'understand',
+    'kept': 'keep',
+    'let': 'let',
+    'put': 'put',
+    'set': 'set',
+    'ran': 'run',
+    'sat': 'sit',
+    'spoke': 'speak',
+    'spoken': 'speak',
+    'stood': 'stand',
+    'won': 'win',
+    'heard': 'hear',
+    'held': 'hold',
+    'met': 'meet',
+    'lost': 'lose',
+    'read': 'read',  // 相同拼写但发音不同
+  };
+  
+  // 常见的不规则名词复数映射
+  static final Map<String, String> _irregularNouns = {
+    'men': 'man',
+    'women': 'woman',
+    'children': 'child',
+    'people': 'person',
+    'mice': 'mouse',
+    'teeth': 'tooth',
+    'feet': 'foot',
+    'geese': 'goose',
+    'oxen': 'ox',
+    'knives': 'knife',
+    'lives': 'life',
+    'wives': 'wife',
+    'shelves': 'shelf',
+    'wolves': 'wolf',
+    'leaves': 'leaf',
+    'loaves': 'loaf',
+    'thieves': 'thief',
+    'potatoes': 'potato',
+    'tomatoes': 'tomato',
+    'heroes': 'hero',
+    'echoes': 'echo',
+    'analyses': 'analysis',
+    'criteria': 'criterion',
+    'phenomena': 'phenomenon',
+    'data': 'datum',
+    'media': 'medium',
+    'cacti': 'cactus',
+    'fungi': 'fungus',
+    'alumni': 'alumnus',
+  };
+  
+  // 特殊处理的形容词，这些词以ed结尾但不应该被还原
+  static final Set<String> _specialAdjectives = {
+    'advanced',
+    'aged',
+    'alleged',
+    'beloved',
+    'blessed',
+    'complicated',
+    'confused',
+    'detailed',
+    'disappointed',
+    'educated',
+    'excited',
+    'experienced',
+    'interested',
+    'limited',
+    'motivated',
+    'prepared',
+    'qualified',
+    'sophisticated',
+    'surprised',
+    'tired',
+    'unexpected',
+    'unbalanced',
+    'undecided',
+    'united',
+    'unwanted',
+    'used',
+    'wicked',
+  };
+  
+  /// 将单词还原为基本形式
+  /// 
+  /// 处理流程：
+  /// 1. 检查是否是特殊形容词
+  /// 2. 检查是否是不规则动词或名词
+  /// 3. 处理常见的后缀规则
+  /// 4. 使用Porter词干提取算法（但避免过度还原）
+  static String lemmatize(String word) {
+    if (word.isEmpty) return word;
+    
+    // 转为小写
+    final lowercaseWord = word.toLowerCase();
+    
+    // 检查是否是特殊形容词
+    if (_specialAdjectives.contains(lowercaseWord)) {
+      return lowercaseWord;
+    }
+    
+    // 检查不规则动词
+    if (_irregularVerbs.containsKey(lowercaseWord)) {
+      return _irregularVerbs[lowercaseWord]!;
+    }
+    
+    // 检查不规则名词
+    if (_irregularNouns.containsKey(lowercaseWord)) {
+      return _irregularNouns[lowercaseWord]!;
+    }
+    
+    // 处理常见的规则后缀
+    if (lowercaseWord.endsWith('s') && !lowercaseWord.endsWith('ss') && !lowercaseWord.endsWith('ous') && !lowercaseWord.endsWith('ious')) {
+      // 可能是复数形式或第三人称单数，但排除以ous/ious结尾的形容词
+      return lowercaseWord.substring(0, lowercaseWord.length - 1);
+    } else if (lowercaseWord.endsWith('es') && lowercaseWord.length > 3 && !lowercaseWord.endsWith('oes')) {
+      // 处理以es结尾的复数，但排除does, goes等
+      return lowercaseWord.substring(0, lowercaseWord.length - 2);
+    } else if (lowercaseWord.endsWith('ies') && lowercaseWord.length > 3) {
+      // 处理以y结尾变为ies的复数
+      return lowercaseWord.substring(0, lowercaseWord.length - 3) + 'y';
+    } else if (lowercaseWord.endsWith('ed') && lowercaseWord.length > 3) {
+      // 处理过去式，但需要检查是否是形容词
+      
+      // 检查是否是常见的以ed结尾的形容词
+      // 这里可以添加更多的启发式规则来判断
+      if (lowercaseWord.endsWith('ated') || 
+          lowercaseWord.endsWith('ized') || 
+          lowercaseWord.endsWith('ised') ||
+          lowercaseWord.startsWith('un') && lowercaseWord.length > 5) {
+        // 可能是形容词，保持原样
+        return lowercaseWord;
+      }
+      
+      if (lowercaseWord.endsWith('ied')) {
+        return lowercaseWord.substring(0, lowercaseWord.length - 3) + 'y';
+      } else if (lowercaseWord.endsWith('eed')) {
+        return lowercaseWord.substring(0, lowercaseWord.length - 1);
+      } else {
+        return lowercaseWord.substring(0, lowercaseWord.length - 2);
+      }
+    } else if (lowercaseWord.endsWith('ing') && lowercaseWord.length > 4) {
+      // 处理现在分词
+      if (lowercaseWord.length > 5 && _isDoubleConsonant(lowercaseWord.substring(lowercaseWord.length - 5, lowercaseWord.length - 3))) {
+        // 双写辅音字母的情况，如running -> run
+        return lowercaseWord.substring(0, lowercaseWord.length - 4);
+      } else if (lowercaseWord.endsWith('ying')) {
+        // 以y结尾的情况，如flying -> fly
+        return lowercaseWord.substring(0, lowercaseWord.length - 4) + 'y';
+      } else {
+        return lowercaseWord.substring(0, lowercaseWord.length - 3);
+      }
+    } 
+    
+    // 对于其他情况，直接返回原词，避免使用Porter词干提取算法过度还原
+    return lowercaseWord;
+  }
+  
+  // 检查是否是双写的辅音字母
+  static bool _isDoubleConsonant(String str) {
+    if (str.length != 2) return false;
+    final consonants = 'bcdfghjklmnpqrstvwxyz';
+    return str[0] == str[1] && consonants.contains(str[0]);
+  }
+} 

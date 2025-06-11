@@ -182,7 +182,9 @@ class VideoService extends ChangeNotifier {
           debugPrint('字幕变化触发循环: 第 $_loopCount 次，等待2秒后从 ${_loopingSubtitle!.start.inSeconds} 秒重新开始');
           
           // 暂停播放
+          if (_player != null) {
           _player!.pause();
+          }
           _isWaitingForLoop = true;
           notifyListeners();
           
@@ -1291,41 +1293,32 @@ class VideoService extends ChangeNotifier {
   void seek(Duration position) {
     if (_player != null) {
       try {
-        debugPrint('跳转到位置: ${position.inMilliseconds}ms');
+        _player!.seek(position);
         
-        // 确保位置在有效范围内
-        final safePosition = Duration(
-          milliseconds: position.inMilliseconds.clamp(0, duration.inMilliseconds)
-        );
+        // 立即更新当前位置，避免UI延迟
+        _currentPosition = position;
         
-        // 执行跳转
-        _player!.seek(safePosition);
+        // 立即更新当前字幕
+        _updateCurrentSubtitle(position);
         
-        // 立即更新当前位置
-        _currentPosition = safePosition;
-        
-        // 强制更新当前字幕状态
-        if (_subtitleData != null && _subtitleData!.entries.isNotEmpty) {
-          // 直接使用跳转位置更新字幕，而不是等待播放器位置更新
-          _updateCurrentSubtitle(safePosition);
-          debugPrint('跳转后立即更新字幕状态，位置: ${safePosition.inMilliseconds}ms');
-          
-          // 再次延迟更新，确保播放器位置已经更新
-          Future.delayed(const Duration(milliseconds: 200), () {
-            if (_player != null) {
-              final actualPosition = _player!.state.position;
-              if ((actualPosition.inMilliseconds - safePosition.inMilliseconds).abs() > 100) {
-                // 如果实际位置与目标位置相差超过100毫秒，再次更新
-                _updateCurrentSubtitle(actualPosition);
-                debugPrint('跳转后再次更新字幕状态，实际位置: ${actualPosition.inMilliseconds}ms');
-              }
-            }
-          });
-        }
+        notifyListeners();
       } catch (e) {
-        debugPrint('跳转错误: $e');
-        // 尝试恢复状态
-        _resetSubtitleState();
+        debugPrint('seek错误: $e');
+      }
+    } else if (_isYouTubeVideo && _youtubeController != null) {
+      try {
+        // 尝试调用YouTube播放器的seekTo方法
+        _youtubeController.seekTo(position);
+        
+        // 更新当前位置
+        _currentPosition = position;
+        
+        // 更新当前字幕
+        _updateCurrentSubtitle(position);
+        
+        notifyListeners();
+      } catch (e) {
+        debugPrint('YouTube seek错误: $e');
       }
     }
   }
@@ -1390,32 +1383,35 @@ class VideoService extends ChangeNotifier {
   // 更新当前字幕
   void _updateCurrentSubtitle(Duration position) {
     if (_subtitleData == null || _subtitleData!.entries.isEmpty) {
-      _currentSubtitle = null;
       return;
     }
     
-    // 获取调整后的字幕
-    final subtitle = _getAdjustedSubtitleAtTime(position);
+    try {
+      // 考虑字幕时间偏移
+      final adjustedPosition = Duration(
+        milliseconds: max(0, position.inMilliseconds - _subtitleTimeOffset)
+      );
     
-    // 检查是否需要更新当前字幕
-    if (subtitle != _currentSubtitle) {
-      _currentSubtitle = subtitle;
+      // 找到当前时间对应的字幕
+      SubtitleEntry? newSubtitle;
       
-      // 如果有字幕变化且处于循环模式但没有选定循环字幕，自动设置当前字幕为循环字幕
-      if (_isLooping && _loopingSubtitle == null && subtitle != null) {
-        _loopingSubtitle = subtitle;
-        debugPrint('自动设置循环字幕: "${subtitle.text}" (${subtitle.start.inSeconds}s - ${subtitle.end.inSeconds}s)');
+      for (final entry in _subtitleData!.entries) {
+        if (entry.start <= adjustedPosition && entry.end > adjustedPosition) {
+          newSubtitle = entry;
+          break;
+        }
       }
       
-      // 记录字幕变化
-      if (subtitle != null) {
-        debugPrint('字幕更新: "${subtitle.text}" (${subtitle.start.inSeconds}s - ${subtitle.end.inSeconds}s)');
-      } else {
-        debugPrint('字幕清空');
+      // 如果找到了新的字幕，且与当前字幕不同，更新当前字幕
+      if (newSubtitle != null && (_currentSubtitle == null || newSubtitle.index != _currentSubtitle!.index)) {
+        _currentSubtitle = newSubtitle;
+        debugPrint('更新当前字幕: #${newSubtitle.index + 1} - ${newSubtitle.text}');
+      } else if (newSubtitle == null && _currentSubtitle != null) {
+        // 如果当前没有字幕，清除当前字幕
+        _currentSubtitle = null;
       }
-      
-      // 通知UI更新
-      notifyListeners();
+    } catch (e) {
+      debugPrint('更新当前字幕错误: $e');
     }
   }
   

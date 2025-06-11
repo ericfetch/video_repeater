@@ -13,9 +13,13 @@ import 'services/message_service.dart';
 import 'services/config_service.dart';
 import 'services/app_services.dart';
 import 'services/download_info_service.dart';
+import 'services/dictionary_service.dart';
 import 'models/history_model.dart';
 import 'screens/home_screen.dart';
 import 'screens/windows_requirements_screen.dart';
+import 'screens/dictionary_management_screen.dart';
+import 'screens/vocabulary_screen.dart';
+import 'screens/history_screen.dart';
 
 // 自定义文本选择控制器，禁用系统默认菜单
 class NoSelectionTextEditingController extends TextEditingController {
@@ -100,6 +104,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => MessageService()),
         ChangeNotifierProvider(create: (_) => ConfigService()),
         ChangeNotifierProvider(create: (_) => DownloadInfoService()),
+        ChangeNotifierProvider(create: (_) => DictionaryService()),
       ],
       child: Consumer<ConfigService>(
         builder: (context, configService, child) {
@@ -110,6 +115,14 @@ class MyApp extends StatelessWidget {
           // 初始化下载信息服务
           final downloadInfoService = Provider.of<DownloadInfoService>(context, listen: false);
           videoService.setDownloadInfoService(downloadInfoService);
+          
+          // 初始化词典服务
+          final dictionaryService = Provider.of<DictionaryService>(context, listen: false);
+          dictionaryService.initialize();
+          
+          // 初始化生词本服务
+          final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+          vocabularyService.initialize();
           
           // 初始化全局服务引用
           AppServices.initServices(context);
@@ -132,6 +145,11 @@ class MyApp extends StatelessWidget {
             builder: (context, child) {
               // 使用自定义Builder显示全局消息
               return MessageOverlay(child: child!);
+            },
+            routes: {
+              '/dictionary': (context) => const DictionaryManagementScreen(),
+              '/vocabulary': (context) => const VocabularyScreen(),
+              '/history': (context) => const HistoryScreen(),
             },
             home: FutureBuilder<bool>(
               future: _checkWindowsRequirements(),

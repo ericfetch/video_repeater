@@ -18,22 +18,35 @@ class VideoPlayerWidget extends StatefulWidget {
 class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   // 视频控制器
   VideoController? _videoController;
+  bool _disposed = false;
 
   @override
   void initState() {
     super.initState();
     // 延迟初始化，确保Provider已经准备好
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _initializeController();
+      if (!_disposed && mounted) {
+        _initializeController();
+      }
     });
   }
   
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+  
   void _initializeController() {
+    if (!mounted) return;
+    
     final videoService = Provider.of<VideoService>(context, listen: false);
     if (videoService.player != null) {
-      setState(() {
-        _videoController = VideoController(videoService.player!);
-      });
+      if (mounted) {
+        setState(() {
+          _videoController = VideoController(videoService.player!);
+        });
+      }
     }
   }
 
@@ -46,7 +59,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     
     // 如果Player实例变化，重新初始化控制器
     if (player != null && (_videoController == null || _videoController!.player != player)) {
-      _videoController = VideoController(player);
+      if (mounted) {
+        _videoController = VideoController(player);
+      }
     }
     
     // 显示错误信息
@@ -118,28 +133,23 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-
-                Column(
-                  children: [
-                    const SizedBox(
-                      width: 48,
-                      height: 48,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 4,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    const Text(
-                      '正在加载视频...',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
+              const SizedBox(
+                width: 48,
+                height: 48,
+                child: CircularProgressIndicator(
+                  strokeWidth: 4,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
                 ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                '正在加载视频...',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
             ],
           ),
         ),
