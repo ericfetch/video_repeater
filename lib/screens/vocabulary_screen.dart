@@ -133,6 +133,87 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
     );
   }
   
+  // 显示编辑单词对话框
+  void _showEditWordDialog(BuildContext context, VocabularyWord word) {
+    final TextEditingController wordController = TextEditingController(text: word.word);
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('编辑单词'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: wordController,
+              decoration: const InputDecoration(
+                labelText: '单词',
+                hintText: '输入正确的单词形式',
+              ),
+              autofocus: true,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '原始单词: ${word.word}',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[600],
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '上下文: ${word.context}',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[600],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final newWord = wordController.text.trim();
+              if (newWord.isEmpty || newWord == word.word) {
+                Navigator.of(context).pop();
+                return;
+              }
+              
+              final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+              
+              // 创建新的单词对象
+              final updatedWord = VocabularyWord(
+                word: newWord,
+                context: word.context,
+                addedTime: word.addedTime,
+                videoName: word.videoName,
+              );
+              
+              // 删除旧单词并添加新单词
+              await vocabularyService.removeWord(word.videoName, word.word);
+              await vocabularyService.addWordDirectly(word.videoName, updatedWord);
+              
+              Navigator.of(context).pop();
+              setState(() {});
+              
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('单词已更新: ${word.word} → $newWord'),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+  
   @override
   Widget build(BuildContext context) {
     final vocabularyService = Provider.of<VocabularyService>(context);
@@ -293,6 +374,11 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
                                   onPressed: () => _copyWord(word.word),
                                 ),
                                 IconButton(
+                                  icon: const Icon(Icons.edit, size: 18),
+                                  tooltip: '编辑单词',
+                                  onPressed: () => _showEditWordDialog(context, word),
+                                ),
+                                IconButton(
                                   icon: const Icon(Icons.delete, size: 18),
                                   tooltip: '删除单词',
                                   onPressed: () async {
@@ -381,6 +467,14 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
                                             onPressed: () {
                                               _copyWord(word.word);
                                               Navigator.pop(context);
+                                            },
+                                          ),
+                                          IconButton(
+                                            icon: const Icon(Icons.edit),
+                                            tooltip: '编辑单词',
+                                            onPressed: () {
+                                              Navigator.pop(context);
+                                              _showEditWordDialog(context, word);
                                             },
                                           ),
                                         ],

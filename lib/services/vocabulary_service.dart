@@ -598,4 +598,47 @@ class VocabularyService extends ChangeNotifier {
     
     return recoveredCount;
   }
+  
+  // 直接添加单词到生词本，不进行词形还原处理
+  Future<void> addWordDirectly(String videoName, VocabularyWord word) async {
+    if (!_isInitialized) await initialize();
+    
+    // 确保视频生词本存在
+    if (!_vocabularyLists.containsKey(videoName)) {
+      _vocabularyLists[videoName] = VocabularyList(
+        videoName: videoName,
+        words: [],
+      );
+    }
+    
+    // 检查单词是否已存在
+    final existingWords = _vocabularyLists[videoName]!.words;
+    final existingWordIndex = existingWords.indexWhere((w) => w.word == word.word);
+    
+    if (existingWordIndex >= 0) {
+      // 如果已存在，更新
+      final updatedWords = List<VocabularyWord>.from(existingWords);
+      updatedWords[existingWordIndex] = word;
+      
+      _vocabularyLists[videoName] = VocabularyList(
+        videoName: videoName,
+        words: updatedWords,
+      );
+    } else {
+      // 如果不存在，添加新的
+      final updatedWords = List<VocabularyWord>.from(existingWords);
+      updatedWords.add(word);
+      
+      _vocabularyLists[videoName] = VocabularyList(
+        videoName: videoName,
+        words: updatedWords,
+      );
+    }
+    
+    // 保存到Hive
+    await _vocabularyBox.put(word.word, word);
+    await saveVocabularyList(videoName);
+    
+    notifyListeners();
+  }
 } 

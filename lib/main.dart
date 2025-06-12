@@ -20,6 +20,7 @@ import 'screens/windows_requirements_screen.dart';
 import 'screens/dictionary_management_screen.dart';
 import 'screens/vocabulary_screen.dart';
 import 'screens/history_screen.dart';
+import 'screens/config_screen.dart';
 
 // 自定义文本选择控制器，禁用系统默认菜单
 class NoSelectionTextEditingController extends TextEditingController {
@@ -150,6 +151,7 @@ class MyApp extends StatelessWidget {
               '/dictionary': (context) => const DictionaryManagementScreen(),
               '/vocabulary': (context) => const VocabularyScreen(),
               '/history': (context) => const HistoryScreen(),
+              '/config': (context) => const ConfigScreen(),
             },
             home: FutureBuilder<bool>(
               future: _checkWindowsRequirements(),
