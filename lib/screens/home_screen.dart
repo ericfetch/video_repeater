@@ -703,7 +703,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                       icon: const Icon(Icons.history, color: Colors.white),
                                       tooltip: '查看历史记录',
                                       onPressed: () {
-                                        Navigator.pushNamed(context, '/history');
+                                        _navigateToHistoryScreen(context);
                                       },
                                     ),
                                     // 生词本按钮
@@ -711,15 +711,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                       icon: const Icon(Icons.book, color: Colors.white),
                                       tooltip: '查看生词本',
                                       onPressed: () {
-                                        Navigator.pushNamed(context, '/vocabulary');
+                                        _navigateToVocabularyScreen(context);
                                       },
                                     ),
                                      // 词典管理按钮
-                                    IconButton(
+                                    _SafeIconButton(
                                       icon: const Icon(Icons.menu_book, color: Colors.white),
                                       tooltip: '词典管理',
                                       onPressed: () {
-                                        Navigator.pushNamed(context, '/dictionary');
+                                        _navigateToDictionaryScreen(context);
                                       },
                                     ),
                                     // 帮助按钮
@@ -802,18 +802,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ],
       ),
     ).then((_) {
-      // 使用Future.microtask延迟恢复自动焦点
+      // 对话框关闭后，使用Future.microtask延迟恢复自动焦点
       Future.microtask(() {
-        if (mounted && _focusNode != null) {
+        if (mounted && _focusNode.hasListeners && context.mounted) {
           setState(() {
             _shouldAutoFocus = true;
           });
           
-          // 对话框关闭后，重新请求主界面焦点
           try {
             FocusScope.of(context).requestFocus(_focusNode);
           } catch (e) {
-            debugPrint('对话框关闭后请求焦点出错: $e');
+            debugPrint('帮助对话框关闭后请求焦点出错: $e');
           }
         }
       });
@@ -1092,34 +1091,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // 在打开设置页面前禁用历史记录加载
     _allowHistoryLoading = false;
     
-    // 禁用自动焦点
-    setState(() {
-      _shouldAutoFocus = false;
-    });
+    // 使用通用导航方法
+    await _navigateToScreen(context, '/config', screenName: '设置');
     
-    // 使用await等待设置页面关闭
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (context) => const ConfigScreen()),
-    );
-    
-    // 设置页面关闭后，重新获取焦点，但不重新加载视频
+    // 设置页面特有的处理：延迟一段时间后再允许历史记录加载，确保不会立即触发
     if (mounted) {
-      // 使用Future.microtask延迟恢复自动焦点
-      Future.microtask(() {
-        if (mounted && _focusNode.hasListeners && context.mounted) {
-          setState(() {
-            _shouldAutoFocus = true;
-          });
-          
-          try {
-            _focusNode.requestFocus();
-          } catch (e) {
-            debugPrint('设置页面关闭后请求焦点出错: $e');
-          }
-        }
-      });
-      
-      // 延迟一段时间后再允许历史记录加载，确保不会立即触发
       Future.delayed(const Duration(milliseconds: 500), () {
         if (mounted) {
           _allowHistoryLoading = true;
@@ -1255,10 +1231,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   Navigator.pop(context);
                   // 使用Future.microtask延迟恢复自动焦点
                   Future.microtask(() {
-                    if (mounted) {
+                    if (mounted && _focusNode.hasListeners && context.mounted) {
                       setState(() {
                         _shouldAutoFocus = true;
                       });
+                      
+                      try {
+                        FocusScope.of(context).requestFocus(_focusNode);
+                      } catch (e) {
+                        debugPrint('抽屉菜单关闭后请求焦点出错: $e');
+                      }
                     }
                   });
                 },
@@ -1304,6 +1286,50 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ],
       ),
     );
+  }
+  
+  // 通用导航方法，用于所有需要焦点管理的页面导航
+  Future<void> _navigateToScreen(BuildContext context, String routeName, {String screenName = '页面'}) async {
+    // 禁用自动焦点
+    setState(() {
+      _shouldAutoFocus = false;
+    });
+    
+    // 使用await等待页面关闭
+    await Navigator.of(context).pushNamed(routeName);
+    
+    // 页面关闭后，重新获取焦点
+    if (mounted) {
+      // 使用Future.microtask延迟恢复自动焦点
+      Future.microtask(() {
+        if (mounted && _focusNode.hasListeners && context.mounted) {
+          setState(() {
+            _shouldAutoFocus = true;
+          });
+          
+          try {
+            _focusNode.requestFocus();
+          } catch (e) {
+            debugPrint('$screenName关闭后请求焦点出错: $e');
+          }
+        }
+      });
+    }
+  }
+  
+  // 导航到生词本页面
+  void _navigateToVocabularyScreen(BuildContext context) async {
+    await _navigateToScreen(context, '/vocabulary', screenName: '生词本');
+  }
+  
+  // 导航到词典管理页面
+  void _navigateToDictionaryScreen(BuildContext context) async {
+    await _navigateToScreen(context, '/dictionary', screenName: '词典管理');
+  }
+  
+  // 导航到历史记录页面
+  void _navigateToHistoryScreen(BuildContext context) async {
+    await _navigateToScreen(context, '/history', screenName: '历史记录');
   }
 }
 
