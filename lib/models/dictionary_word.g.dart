@@ -8,7 +8,7 @@ part of 'dictionary_word.dart';
 
 class DictionaryWordAdapter extends TypeAdapter<DictionaryWord> {
   @override
-  final int typeId = 1;
+  final int typeId = 2;
 
   @override
   DictionaryWord read(BinaryReader reader) {

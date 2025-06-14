@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'video_service.dart';
 import 'history_service.dart';
-import 'vocabulary_service.dart';
+import 'vocabulary_service.dart' as vocabService;
 import 'message_service.dart';
 import 'config_service.dart';
 
@@ -10,7 +10,7 @@ import 'config_service.dart';
 class AppServices {
   static VideoService? videoService;
   static HistoryService? historyService;
-  static VocabularyService? vocabularyService;
+  static vocabService.VocabularyService? vocabularyService;
   static MessageService? messageService;
   static ConfigService? configService;
   
@@ -18,7 +18,7 @@ class AppServices {
   static void initServices(BuildContext context) {
     videoService = Provider.of<VideoService>(context, listen: false);
     historyService = Provider.of<HistoryService>(context, listen: false);
-    vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+    vocabularyService = Provider.of<vocabService.VocabularyService>(context, listen: false);
     messageService = Provider.of<MessageService>(context, listen: false);
     configService = Provider.of<ConfigService>(context, listen: false);
     

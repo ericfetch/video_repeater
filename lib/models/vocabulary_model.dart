@@ -2,7 +2,7 @@ import 'package:hive/hive.dart';
 
 part 'vocabulary_model.g.dart';
 
-@HiveType(typeId: 2)
+@HiveType(typeId: 4)
 class VocabularyWord {
   @HiveField(0)
   final String word;        // 单词
@@ -44,7 +44,7 @@ class VocabularyWord {
   }
 }
 
-@HiveType(typeId: 3)
+@HiveType(typeId: 5)
 class VocabularyList {
   @HiveField(0)
   final String videoName;             // 视频名称

@@ -123,13 +123,9 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
       videoService.currentVideoPath,
     );
     
-    // 显示提示
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('已添加 "$word" 到生词本'),
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    // 使用通用消息服务显示提示
+    final messageService = Provider.of<MessageService>(context, listen: false);
+    messageService.showSuccess('已添加 "$word" 到生词本');
   }
   
   @override

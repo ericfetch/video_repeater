@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../services/vocabulary_service.dart';
 import '../models/vocabulary_model.dart';
 import '../services/dictionary_service.dart';
+import '../services/message_service.dart';
 import '../models/dictionary_word.dart';
 
 class VocabularyScreen extends StatefulWidget {
@@ -108,13 +109,9 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
     // 复制到剪贴板
     await Clipboard.setData(ClipboardData(text: buffer.toString()));
     
-    // 显示提示
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('已复制 ${_selectedWords.length} 个单词到剪贴板'),
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    // 使用通用消息服务显示提示
+    final messageService = Provider.of<MessageService>(context, listen: false);
+    messageService.showSuccess('已复制 ${_selectedWords.length} 个单词到剪贴板');
     
     // 退出选择模式
     setState(() {
@@ -125,12 +122,8 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
   
   void _copyWord(String word) {
     Clipboard.setData(ClipboardData(text: word));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('已复制: $word'),
-        duration: const Duration(seconds: 1),
-      ),
-    );
+    final messageService = Provider.of<MessageService>(context, listen: false);
+    messageService.showInfo('已复制: $word');
   }
   
   // 显示编辑单词对话框
@@ -200,12 +193,9 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
               Navigator.of(context).pop();
               setState(() {});
               
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('单词已更新: ${word.word} → $newWord'),
-                  duration: const Duration(seconds: 2),
-                ),
-              );
+              // 使用通用消息服务显示提示
+              final messageService = Provider.of<MessageService>(context, listen: false);
+              messageService.showSuccess('单词已更新: ${word.word} → $newWord');
             },
             child: const Text('保存'),
           ),
@@ -319,12 +309,8 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
                     onPressed: () {
                       final words = allWords.map((w) => w.word).join('\n');
                       Clipboard.setData(ClipboardData(text: words));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('已复制所有单词到剪贴板'),
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
+                      final messageService = Provider.of<MessageService>(context, listen: false);
+                      messageService.showSuccess('已复制所有单词到剪贴板');
                     },
                   ),
                 ],

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/config_service.dart';
 import '../services/video_service.dart';
+import '../services/message_service.dart';
 
 class ConfigScreen extends StatelessWidget {
   const ConfigScreen({super.key});
@@ -148,9 +149,8 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
     configService.updateSubtitleMatchMode(_subtitleMatchMode);
     configService.updateDarkMode(_isDarkMode);
     
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('设置已保存')),
-    );
+    final messageService = Provider.of<MessageService>(context, listen: false);
+    messageService.showSuccess('设置已保存');
   }
   
   // 重置为默认设置

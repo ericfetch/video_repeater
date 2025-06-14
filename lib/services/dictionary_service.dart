@@ -8,71 +8,18 @@ import 'package:csv/csv.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/dictionary_word.dart';
-
-// 定义DictionaryWord适配器
-class DictionaryWordAdapter extends TypeAdapter<DictionaryWord> {
-  @override
-  final int typeId = 1;
-
-  @override
-  DictionaryWord read(BinaryReader reader) {
-    final numOfFields = reader.readByte();
-    final fields = <int, dynamic>{
-      for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
-    };
-    
-    return DictionaryWord(
-      word: fields[0] as String,
-      partOfSpeech: fields[1] as String?,
-      definition: fields[2] as String?,
-      rank: fields[3] as int?,
-      isVocabulary: fields[4] as bool? ?? false,
-      phonetic: fields.containsKey(5) ? fields[5] as String? : null,
-      cefr: fields.containsKey(6) ? fields[6] as String? : null,
-      extraInfo: fields.containsKey(7) ? (fields[7] as Map?)?.cast<String, dynamic>() : null,
-    );
-  }
-
-  @override
-  void write(BinaryWriter writer, DictionaryWord obj) {
-    writer
-      ..writeByte(8)  // 更新字段数量
-      ..writeByte(0)
-      ..write(obj.word)
-      ..writeByte(1)
-      ..write(obj.partOfSpeech)
-      ..writeByte(2)
-      ..write(obj.definition)
-      ..writeByte(3)
-      ..write(obj.rank)
-      ..writeByte(4)
-      ..write(obj.isVocabulary)
-      ..writeByte(5)
-      ..write(obj.phonetic)
-      ..writeByte(6)
-      ..write(obj.cefr)
-      ..writeByte(7)
-      ..write(obj.extraInfo);
-  }
-
-  @override
-  int get hashCode => typeId.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is DictionaryWordAdapter &&
-          runtimeType == other.runtimeType &&
-          typeId == other.typeId;
-}
+import '../models/history_model.dart';
 
 class DictionaryService extends ChangeNotifier {
+  // 盒子名称
   static const String _dictionaryBoxName = 'dictionary';
   static const String _vocabularyBoxName = 'vocabulary';
   
+  // Hive盒子
   late Box<DictionaryWord> _dictionaryBox;
   late Box<DictionaryWord> _vocabularyBox;
   
+  // 初始化标志
   bool _isInitialized = false;
   bool get isInitialized => _isInitialized;
   
@@ -89,20 +36,50 @@ class DictionaryService extends ChangeNotifier {
   Future<void> initialize() async {
     if (_isInitialized) return;
     
-    final appDocumentDir = await getApplicationDocumentsDirectory();
-    Hive.init(appDocumentDir.path);
-    
-    // 注册适配器
-    if (!Hive.isAdapterRegistered(1)) {
-      Hive.registerAdapter(DictionaryWordAdapter());
+    try {
+      final appDocumentDir = await getApplicationDocumentsDirectory();
+      
+      // 尝试初始化Hive，如果已初始化则忽略错误
+      try {
+        Hive.init(appDocumentDir.path);
+      } catch (e) {
+        debugPrint('Hive可能已经初始化: $e');
+      }
+      
+      try {
+        // 打开盒子
+        debugPrint('尝试打开词典盒子: $_dictionaryBoxName');
+        _dictionaryBox = await Hive.openBox<DictionaryWord>(_dictionaryBoxName);
+        debugPrint('词典盒子打开成功，包含${_dictionaryBox.length}条记录');
+        
+        debugPrint('打开生词本盒子: $_vocabularyBoxName');
+        _vocabularyBox = await Hive.openBox<DictionaryWord>(_vocabularyBoxName);
+        debugPrint('生词本盒子打开成功，包含${_vocabularyBox.length}条记录');
+      } catch (e) {
+        debugPrint('打开盒子失败: $e');
+        
+        // 如果打开失败，尝试删除并重新创建
+        try {
+          debugPrint('尝试删除并重新创建盒子');
+          await Hive.deleteBoxFromDisk(_dictionaryBoxName);
+          await Hive.deleteBoxFromDisk(_vocabularyBoxName);
+          
+          _dictionaryBox = await Hive.openBox<DictionaryWord>(_dictionaryBoxName);
+          _vocabularyBox = await Hive.openBox<DictionaryWord>(_vocabularyBoxName);
+          debugPrint('盒子重新创建成功');
+        } catch (e) {
+          debugPrint('重新创建盒子失败: $e');
+          throw Exception('无法创建词典数据库: $e');
+        }
+      }
+      
+      _isInitialized = true;
+      debugPrint('词典服务初始化成功');
+      notifyListeners();
+    } catch (e) {
+      debugPrint('初始化词典服务失败: $e');
+      debugPrintStack(stackTrace: StackTrace.current);
     }
-    
-    // 打开盒子
-    _dictionaryBox = await Hive.openBox<DictionaryWord>(_dictionaryBoxName);
-    _vocabularyBox = await Hive.openBox<DictionaryWord>(_vocabularyBoxName);
-    
-    _isInitialized = true;
-    notifyListeners();
   }
   
   // 关闭Hive数据库

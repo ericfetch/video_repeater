@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../models/subtitle_model.dart';
 import '../services/vocabulary_service.dart';
 import '../services/dictionary_service.dart';
+import '../services/message_service.dart';
 import '../utils/word_lemmatizer.dart';
 
 class SubtitleSelectionArea extends StatelessWidget {
@@ -232,6 +233,10 @@ class SubtitleSelectionArea extends StatelessWidget {
               
               // 同时复制到剪贴板
               Clipboard.setData(ClipboardData(text: selectedText));
+              
+              // 显示添加成功提示
+              final messageService = Provider.of<MessageService>(context, listen: false);
+              messageService.showSuccess('已添加 "$selectedText" 到生词本');
               
               // 清除选择
               editableTextState.hideToolbar();

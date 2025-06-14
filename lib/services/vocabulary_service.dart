@@ -11,7 +11,7 @@ import 'package:path/path.dart' as path;
 // 定义VocabularyWord适配器
 class VocabularyWordAdapter extends TypeAdapter<VocabularyWord> {
   @override
-  final int typeId = 2;
+  final int typeId = 4;
 
   @override
   VocabularyWord read(BinaryReader reader) {
@@ -56,7 +56,7 @@ class VocabularyWordAdapter extends TypeAdapter<VocabularyWord> {
 // 定义VocabularyList适配器
 class VocabularyListAdapter extends TypeAdapter<VocabularyList> {
   @override
-  final int typeId = 3;
+  final int typeId = 5;
 
   @override
   VocabularyList read(BinaryReader reader) {
@@ -128,25 +128,57 @@ class VocabularyService extends ChangeNotifier {
   Future<void> initialize() async {
     if (_isInitialized) return;
     
-    final appDocumentDir = await getApplicationDocumentsDirectory();
-    Hive.init(appDocumentDir.path);
-    
-    // 注册适配器
-    if (!Hive.isAdapterRegistered(2)) {
-      Hive.registerAdapter(VocabularyWordAdapter());
+    try {
+      final appDocumentDir = await getApplicationDocumentsDirectory();
+      
+      // 尝试初始化Hive
+      try {
+        Hive.init(appDocumentDir.path);
+      } catch (e) {
+        debugPrint('Hive可能已经初始化: $e');
+      }
+      
+      // 注册适配器
+      if (!Hive.isAdapterRegistered(4)) {
+        Hive.registerAdapter(VocabularyWordAdapter());
+        debugPrint('注册VocabularyWordAdapter成功，typeId=4');
+      }
+      if (!Hive.isAdapterRegistered(5)) {
+        Hive.registerAdapter(VocabularyListAdapter());
+        debugPrint('注册VocabularyListAdapter成功，typeId=5');
+      }
+      
+      try {
+        // 打开盒子
+        debugPrint('尝试打开生词本盒子');
+        _vocabularyBox = await Hive.openBox<VocabularyWord>(_vocabularyBoxName);
+        _vocabularyListsBox = await Hive.openBox<VocabularyList>(_vocabularyListsBoxName);
+        debugPrint('盒子打开成功');
+      } catch (e) {
+        debugPrint('打开盒子失败，尝试删除并重建: $e');
+        
+        // 如果打开失败，尝试删除并重新创建
+        try {
+          await Hive.deleteBoxFromDisk(_vocabularyBoxName);
+          await Hive.deleteBoxFromDisk(_vocabularyListsBoxName);
+          
+          _vocabularyBox = await Hive.openBox<VocabularyWord>(_vocabularyBoxName);
+          _vocabularyListsBox = await Hive.openBox<VocabularyList>(_vocabularyListsBoxName);
+          debugPrint('盒子重建成功');
+        } catch (e) {
+          debugPrint('盒子重建失败: $e');
+          throw Exception('无法初始化生词本: $e');
+        }
+      }
+      
+      _isInitialized = true;
+      
+      // 加载所有生词本
+      await loadAllVocabularyLists();
+    } catch (e) {
+      debugPrint('生词本服务初始化失败: $e');
+      debugPrintStack(stackTrace: StackTrace.current);
     }
-    if (!Hive.isAdapterRegistered(3)) {
-      Hive.registerAdapter(VocabularyListAdapter());
-    }
-    
-    // 打开盒子
-    _vocabularyBox = await Hive.openBox<VocabularyWord>(_vocabularyBoxName);
-    _vocabularyListsBox = await Hive.openBox<VocabularyList>(_vocabularyListsBoxName);
-    
-    _isInitialized = true;
-    
-    // 加载所有生词本
-    await loadAllVocabularyLists();
   }
   
   // 关闭Hive数据库
@@ -256,22 +288,40 @@ class VocabularyService extends ChangeNotifier {
     // 清空当前数据
     _vocabularyLists.clear();
     
-    // 从Hive加载所有生词本
-    final lists = _vocabularyListsBox.values;
-    for (final list in lists) {
-      _vocabularyLists[list.videoName] = list;
-    }
-    
-    // 如果Hive中没有数据，尝试从旧的SharedPreferences中迁移
-    if (_vocabularyLists.isEmpty) {
-      await _migrateFromSharedPreferences();
+    try {
+      debugPrint('开始加载所有生词本...');
+      
+      // 从Hive加载所有生词本
+      final lists = _vocabularyListsBox.values;
+      debugPrint('找到${lists.length}个生词本列表');
+      
+      for (final list in lists) {
+        try {
+          _vocabularyLists[list.videoName] = list;
+          debugPrint('加载生词本: ${list.videoName}, 包含${list.words.length}个单词');
+        } catch (e) {
+          debugPrint('加载生词本"${list.videoName}"失败: $e');
+        }
+      }
+      
+      // 如果Hive中没有数据，尝试从旧的SharedPreferences中迁移
+      if (_vocabularyLists.isEmpty) {
+        debugPrint('生词本为空，尝试从SharedPreferences迁移数据');
+        final recoveredCount = await _migrateFromSharedPreferences();
+        debugPrint('从SharedPreferences恢复了$recoveredCount个生词本');
+      }
+      
+      debugPrint('所有生词本加载完成，共${_vocabularyLists.length}个');
+    } catch (e) {
+      debugPrint('加载生词本失败: $e');
+      debugPrintStack(stackTrace: StackTrace.current);
     }
     
     notifyListeners();
   }
   
   // 从SharedPreferences迁移数据到Hive
-  Future<void> _migrateFromSharedPreferences() async {
+  Future<int> _migrateFromSharedPreferences() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final allKeys = prefs.getKeys();
@@ -313,6 +363,8 @@ class VocabularyService extends ChangeNotifier {
     } catch (e) {
       debugPrint('从SharedPreferences迁移数据失败: $e');
     }
+    
+    return _vocabularyLists.length;
   }
   
   // 加载特定视频的生词本
@@ -349,54 +401,75 @@ class VocabularyService extends ChangeNotifier {
   Future<void> addWord(String videoName, String word, String context) async {
     if (!_isInitialized) await initialize();
     
-    // 确保视频生词本存在
-    if (!_vocabularyLists.containsKey(videoName)) {
-      _vocabularyLists[videoName] = VocabularyList(
-        videoName: videoName,
-        words: [],
-      );
-    }
-    
-    // 对单词进行词形还原，获取原形
-    final lemmatizedWord = WordLemmatizer.lemmatize(word);
-    
-    // 创建新单词，使用还原后的形式
-    final newWord = VocabularyWord(
-      word: lemmatizedWord,
-      context: context,
-      addedTime: DateTime.now(),
-      videoName: videoName,
-    );
-    
-    // 检查单词是否已存在
-    final existingWords = _vocabularyLists[videoName]!.words;
-    final existingWordIndex = existingWords.indexWhere((w) => w.word == lemmatizedWord);
-    
-    if (existingWordIndex >= 0) {
-      // 如果已存在，更新
-      final updatedWords = List<VocabularyWord>.from(existingWords);
-      updatedWords[existingWordIndex] = newWord;
+    try {
+      debugPrint('添加单词到生词本: $word');
       
-      _vocabularyLists[videoName] = VocabularyList(
-        videoName: videoName,
-        words: updatedWords,
-      );
-    } else {
-      // 如果不存在，添加新的
-      final updatedWords = List<VocabularyWord>.from(existingWords);
-      updatedWords.add(newWord);
+      // 确保视频生词本存在
+      if (!_vocabularyLists.containsKey(videoName)) {
+        debugPrint('创建新的生词本: $videoName');
+        _vocabularyLists[videoName] = VocabularyList(
+          videoName: videoName,
+          words: [],
+        );
+      }
       
-      _vocabularyLists[videoName] = VocabularyList(
+      // 对单词进行词形还原，获取原形
+      final lemmatizedWord = WordLemmatizer.lemmatize(word);
+      debugPrint('词形还原: $word -> $lemmatizedWord');
+      
+      // 创建新单词，使用还原后的形式
+      final newWord = VocabularyWord(
+        word: lemmatizedWord,
+        context: context,
+        addedTime: DateTime.now(),
         videoName: videoName,
-        words: updatedWords,
       );
+      
+      // 检查单词是否已存在
+      final existingWords = _vocabularyLists[videoName]!.words;
+      final existingWordIndex = existingWords.indexWhere((w) => w.word == lemmatizedWord);
+      
+      if (existingWordIndex >= 0) {
+        debugPrint('单词已存在，更新: $lemmatizedWord');
+        // 如果已存在，更新
+        final updatedWords = List<VocabularyWord>.from(existingWords);
+        updatedWords[existingWordIndex] = newWord;
+        
+        _vocabularyLists[videoName] = VocabularyList(
+          videoName: videoName,
+          words: updatedWords,
+        );
+      } else {
+        debugPrint('添加新单词: $lemmatizedWord');
+        // 如果不存在，添加新的
+        final updatedWords = List<VocabularyWord>.from(existingWords);
+        updatedWords.add(newWord);
+        
+        _vocabularyLists[videoName] = VocabularyList(
+          videoName: videoName,
+          words: updatedWords,
+        );
+      }
+      
+      try {
+        // 保存到Hive
+        debugPrint('保存单词到Hive: $lemmatizedWord');
+        await _vocabularyBox.put(lemmatizedWord, newWord);
+        
+        debugPrint('保存生词本列表到Hive: $videoName');
+        await saveVocabularyList(videoName);
+        
+        debugPrint('单词添加成功: $lemmatizedWord');
+      } catch (e) {
+        debugPrint('保存到Hive失败: $e');
+        debugPrintStack(stackTrace: StackTrace.current);
+      }
+      
+      notifyListeners();
+    } catch (e) {
+      debugPrint('添加单词失败: $e');
+      debugPrintStack(stackTrace: StackTrace.current);
     }
-    
-    // 保存到Hive
-    await _vocabularyBox.put(lemmatizedWord, newWord);
-    await saveVocabularyList(videoName);
-    
-    notifyListeners();
   }
   
   // 从生词本中删除单词

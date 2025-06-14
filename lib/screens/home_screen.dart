@@ -316,48 +316,78 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // 保存当前进度到历史记录
   void _saveCurrentProgress() {
     if (!mounted) {
+      debugPrint('组件已卸载，无法保存进度');
       return;
     }
     
     try {
-      if (_videoService == null || _historyService == null) {
-        debugPrint('视频服务或历史记录服务引用为空，无法保存进度');
+      if (_videoService == null) {
+        debugPrint('视频服务引用为空，无法保存进度');
+        return;
+      }
+      
+      if (_historyService == null) {
+        debugPrint('历史记录服务引用为空，无法保存进度');
         return;
       }
       
       // 使用VideoService中的路径，确保是最新的
       final currentVideoPath = _videoService!.currentVideoPath;
-      final subtitlePath = _videoService!.currentSubtitlePath ?? '';
       
-      if (currentVideoPath != null && _videoService!.player != null) {
-        final videoName = path.basename(currentVideoPath);
-        final position = _videoService!.currentPosition;
-        final subtitleTimeOffset = _videoService!.subtitleTimeOffset;
-        
-        debugPrint('保存进度 - 视频: $videoName, 位置: ${position.inSeconds}秒');
-        debugPrint('- 视频路径: $currentVideoPath');
-        debugPrint('- 字幕路径: $subtitlePath');
-        debugPrint('- 字幕偏移: ${subtitleTimeOffset/1000}秒');
-        
-        final history = VideoHistory(
-          videoPath: currentVideoPath,
-          subtitlePath: subtitlePath, // 使用空字符串代替null
-          videoName: videoName,
-          lastPosition: position,
-          timestamp: DateTime.now(),
-          subtitleTimeOffset: subtitleTimeOffset,
-        );
-        
-        _historyService!.addHistory(history);
-        
-        // 更新本地路径变量，确保与VideoService同步
-        _currentVideoPath = currentVideoPath;
-        _currentSubtitlePath = subtitlePath;
-      } else {
-        debugPrint('无法保存进度: 视频路径为空或播放器未初始化');
+      if (currentVideoPath == null || currentVideoPath.isEmpty) {
+        debugPrint('视频路径为空，无法保存进度');
+        _showSnackBar('无法保存进度：未加载视频');
+        return;
       }
+      
+      if (_videoService!.player == null) {
+        debugPrint('播放器未初始化，无法保存进度');
+        _showSnackBar('无法保存进度：播放器未初始化');
+        return;
+      }
+      
+      final subtitlePath = _videoService!.currentSubtitlePath ?? '';
+      final videoName = path.basename(currentVideoPath);
+      final position = _videoService!.currentPosition;
+      final subtitleTimeOffset = _videoService!.subtitleTimeOffset;
+      
+      debugPrint('保存进度 - 视频: $videoName, 位置: ${position.inSeconds}秒');
+      debugPrint('- 视频路径: $currentVideoPath');
+      debugPrint('- 字幕路径: $subtitlePath');
+      debugPrint('- 字幕偏移: ${subtitleTimeOffset/1000}秒');
+      
+      final history = VideoHistory(
+        videoPath: currentVideoPath,
+        subtitlePath: subtitlePath, // 使用空字符串代替null
+        videoName: videoName,
+        lastPosition: position,
+        timestamp: DateTime.now(),
+        subtitleTimeOffset: subtitleTimeOffset,
+      );
+      
+      // 确保历史服务已初始化并添加历史记录
+      debugPrint('尝试初始化历史记录服务并添加记录...');
+      _historyService!.initialize().then((_) {
+        debugPrint('历史记录服务初始化完成，现在添加历史记录');
+        _historyService!.addHistory(history).then((_) {
+          debugPrint('历史记录添加成功');
+          _showSnackBar('已保存当前进度');
+        }).catchError((error) {
+          debugPrint('添加历史记录失败: $error');
+          _showSnackBar('保存进度失败: $error');
+        });
+      }).catchError((error) {
+        debugPrint('初始化历史记录服务失败: $error');
+        _showSnackBar('无法初始化历史记录服务: $error');
+      });
+      
+      // 更新本地路径变量，确保与VideoService同步
+      _currentVideoPath = currentVideoPath;
+      _currentSubtitlePath = subtitlePath;
     } catch (e) {
       debugPrint('保存播放进度时出错: $e');
+      debugPrintStack(stackTrace: StackTrace.current);
+      _showSnackBar('保存进度失败，请查看控制台日志');
     }
   }
   
@@ -695,7 +725,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                       tooltip: '保存进度',
                                       onPressed: () {
                                         _saveCurrentProgress();
-                                        _showSnackBar('已保存当前进度');
                                       },
                                     ),
                                     // 历史记录按钮

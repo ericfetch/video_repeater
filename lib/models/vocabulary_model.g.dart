@@ -8,7 +8,7 @@ part of 'vocabulary_model.dart';
 
 class VocabularyWordAdapter extends TypeAdapter<VocabularyWord> {
   @override
-  final int typeId = 2;
+  final int typeId = 4;
 
   @override
   VocabularyWord read(BinaryReader reader) {
@@ -51,7 +51,7 @@ class VocabularyWordAdapter extends TypeAdapter<VocabularyWord> {
 
 class VocabularyListAdapter extends TypeAdapter<VocabularyList> {
   @override
-  final int typeId = 3;
+  final int typeId = 5;
 
   @override
   VocabularyList read(BinaryReader reader) {
