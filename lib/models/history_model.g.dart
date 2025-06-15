@@ -8,7 +8,7 @@ part of 'history_model.dart';
 
 class VideoHistoryAdapter extends TypeAdapter<VideoHistory> {
   @override
-  final int typeId = 1;
+  final int typeId = 21;
 
   @override
   VideoHistory read(BinaryReader reader) {

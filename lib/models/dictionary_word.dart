@@ -2,7 +2,7 @@ import 'package:hive/hive.dart';
 
 part 'dictionary_word.g.dart';
 
-@HiveType(typeId: 2)
+@HiveType(typeId: 31)
 class DictionaryWord extends HiveObject {
   @HiveField(0)
   String word;

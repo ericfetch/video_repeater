@@ -7,24 +7,22 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
-import 'package:hive/hive.dart';
 import 'services/video_service.dart';
 import 'services/history_service.dart';
-import 'services/vocabulary_service.dart' as vocabService;
+import 'services/vocabulary_service.dart';
 import 'services/message_service.dart';
 import 'services/config_service.dart';
 import 'services/app_services.dart';
 import 'services/download_info_service.dart';
 import 'services/dictionary_service.dart';
 import 'models/history_model.dart';
-import 'models/dictionary_word.dart';
-import 'models/vocabulary_model.dart';
 import 'screens/home_screen.dart';
 import 'screens/windows_requirements_screen.dart';
 import 'screens/dictionary_management_screen.dart';
 import 'screens/vocabulary_screen.dart';
-import 'screens/config_screen.dart';
 import 'screens/history_screen.dart';
+import 'screens/config_screen.dart';
+import 'package:hive/hive.dart';
 
 // 自定义文本选择控制器，禁用系统默认菜单
 class NoSelectionTextEditingController extends TextEditingController {
@@ -53,38 +51,6 @@ void main() async {
     debugPrint('开始初始化Hive...');
     final appDocumentDir = await getApplicationDocumentsDirectory();
     Hive.init(appDocumentDir.path);
-    
-    // 确保在应用启动时注册所有适配器
-    if (!Hive.isAdapterRegistered(1)) {
-      Hive.registerAdapter(VideoHistoryAdapter());
-      debugPrint('VideoHistoryAdapter注册成功，typeId=1');
-    }
-    
-    if (!Hive.isAdapterRegistered(2)) {
-      Hive.registerAdapter(DictionaryWordAdapter());
-      debugPrint('DictionaryWordAdapter注册成功，typeId=2');
-    }
-    
-    // 注册VocabularyWord和VocabularyList适配器
-    if (!Hive.isAdapterRegistered(4)) {
-      Hive.registerAdapter(vocabService.VocabularyWordAdapter());
-      debugPrint('VocabularyWordAdapter注册成功，typeId=4');
-    }
-    
-    if (!Hive.isAdapterRegistered(5)) {
-      Hive.registerAdapter(vocabService.VocabularyListAdapter());
-      debugPrint('VocabularyListAdapter注册成功，typeId=5');
-    }
-    
-    if (!Hive.isAdapterRegistered(16)) {
-      Hive.registerAdapter(DateTimeAdapter());
-      debugPrint('DateTimeAdapter注册成功，typeId=16');
-    }
-    
-    if (!Hive.isAdapterRegistered(17)) {
-      Hive.registerAdapter(DurationAdapter());
-      debugPrint('DurationAdapter注册成功，typeId=17');
-    }
     
     debugPrint('Hive初始化完成');
   } catch (e) {
@@ -148,7 +114,7 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => VideoService()),
         ChangeNotifierProvider(create: (_) => HistoryService()),
-        ChangeNotifierProvider(create: (_) => vocabService.VocabularyService()),
+        ChangeNotifierProvider(create: (_) => VocabularyService()),
         ChangeNotifierProvider(create: (_) => MessageService()),
         ChangeNotifierProvider(create: (_) => ConfigService()),
         ChangeNotifierProvider(create: (_) => DownloadInfoService()),
@@ -169,7 +135,7 @@ class MyApp extends StatelessWidget {
           dictionaryService.initialize();
           
           // 初始化生词本服务
-          final vocabularyService = Provider.of<vocabService.VocabularyService>(context, listen: false);
+          final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
           vocabularyService.initialize();
           
           // 初始化历史记录服务

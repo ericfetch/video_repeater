@@ -11,7 +11,7 @@ import 'package:path/path.dart' as path;
 // 定义VocabularyWord适配器
 class VocabularyWordAdapter extends TypeAdapter<VocabularyWord> {
   @override
-  final int typeId = 4;
+  final int typeId = 41;
 
   @override
   VocabularyWord read(BinaryReader reader) {
@@ -56,7 +56,7 @@ class VocabularyWordAdapter extends TypeAdapter<VocabularyWord> {
 // 定义VocabularyList适配器
 class VocabularyListAdapter extends TypeAdapter<VocabularyList> {
   @override
-  final int typeId = 5;
+  final int typeId = 42;
 
   @override
   VocabularyList read(BinaryReader reader) {
@@ -139,13 +139,13 @@ class VocabularyService extends ChangeNotifier {
       }
       
       // 注册适配器
-      if (!Hive.isAdapterRegistered(4)) {
+      if (!Hive.isAdapterRegistered(41)) {
         Hive.registerAdapter(VocabularyWordAdapter());
-        debugPrint('注册VocabularyWordAdapter成功，typeId=4');
+        debugPrint('注册VocabularyWordAdapter成功，typeId=41');
       }
-      if (!Hive.isAdapterRegistered(5)) {
+      if (!Hive.isAdapterRegistered(42)) {
         Hive.registerAdapter(VocabularyListAdapter());
-        debugPrint('注册VocabularyListAdapter成功，typeId=5');
+        debugPrint('注册VocabularyListAdapter成功，typeId=42');
       }
       
       try {

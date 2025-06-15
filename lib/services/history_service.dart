@@ -97,7 +97,7 @@ class HistoryService extends ChangeNotifier {
       
       // 注册VideoHistory适配器
       try {
-        if (!Hive.isAdapterRegistered(1)) {
+        if (!Hive.isAdapterRegistered(21)) {
           debugPrint('注册VideoHistoryAdapter...');
           // 使用生成的适配器
           Hive.registerAdapter(VideoHistoryAdapter());
