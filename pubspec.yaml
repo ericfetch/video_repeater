@@ -47,6 +47,8 @@ dependencies:
   
   # 数据持久化
   shared_preferences: ^2.2.2
+  hive: ^2.2.3                                   # Hive数据库
+  hive_flutter: ^1.1.0                           # Hive Flutter集成
   
   # 状态管理
   provider: ^6.1.1
@@ -59,10 +61,28 @@ dependencies:
 
   # URL启动器
   url_launcher: ^6.1.14
+  
+  # YouTube集成
+  webview_flutter: ^4.7.0
+  desktop_webview_window: ^0.2.3
+  youtube_explode_dart: ^2.1.0
+  youtube_player_iframe: ^5.2.1
+  
+  # CSV处理
+  csv: ^5.1.1
+  
+  # HTTP请求
+  http: ^1.2.0
+  
+  # 词形还原
+  english_words: ^4.0.0
+  stemmer: ^2.2.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  hive_generator: ^2.0.1                         # Hive代码生成
+  build_runner: ^2.4.8                           # 代码生成工具
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -85,14 +105,14 @@ flutter:
 
   # To add assets to your application, add an assets section, like this:
   # assets:
-  #   - images/a_dot_burr.jpeg
+  #   - assets/images/
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see
-  # https://flutter.dev/to/resolution-aware-images
+  # https://flutter.dev/assets-and-images/#resolution-aware
 
   # For details regarding adding assets from package dependencies, see
-  # https://flutter.dev/to/asset-from-package
+  # https://flutter.dev/assets-and-images/#from-packages
 
   # To add custom fonts to your application, add a fonts section here,
   # in this "flutter" section. Each entry in this list should have a
@@ -112,12 +132,11 @@ flutter:
   #         weight: 700
   #
   # For details regarding fonts from package dependencies,
-  # see https://flutter.dev/to/font-from-package
+  # see https://flutter.dev/custom-fonts/#from-packages
 
-# Windows MSIX配置
 msix_config:
-  display_name: 视频复读机
-  publisher_display_name: 语言学习工具
+  display_name: 视频学习助手
+  publisher_display_name: 视频学习助手
   identity_name: com.example.videorepeaterstudylanguage
   msix_version: 1.0.0.0
   logo_path: windows/runner/resources/app_icon.ico

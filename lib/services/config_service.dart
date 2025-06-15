@@ -23,6 +23,10 @@ class ConfigService extends ChangeNotifier {
     'subtitleMatchMode': 'same', // 字幕匹配模式: same(与视频同名), suffix(添加后缀)
     'subtitleSuffixes': ['_en', '.en', '-en', '_chs', '.chs', '-chs'], // 字幕后缀列表
     
+    // YouTube设置
+    'youtubeDownloadPath': '', // YouTube视频下载路径，空表示使用临时目录
+    'youtubeVideoQuality': '480p', // YouTube视频质量
+    
     // 界面设置
     'darkMode': false,
   };
@@ -64,6 +68,12 @@ class ConfigService extends ChangeNotifier {
   // 获取字幕后缀列表
   List<String> get subtitleSuffixes => 
       List<String>.from(_config['subtitleSuffixes'] ?? ['_en', '.en', '-en', '_chs', '.chs', '-chs']);
+  
+  // 获取YouTube视频下载路径
+  String get youtubeDownloadPath => _config['youtubeDownloadPath'] ?? '';
+  
+  // 获取YouTube视频质量
+  String get youtubeVideoQuality => _config['youtubeVideoQuality'] ?? '480p';
   
   // 获取暗黑模式
   bool get darkMode => _config['darkMode'];
@@ -170,6 +180,20 @@ class ConfigService extends ChangeNotifier {
   // 更新字幕后缀列表
   Future<void> updateSubtitleSuffixes(List<String> suffixes) async {
     _config['subtitleSuffixes'] = suffixes;
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新YouTube视频下载路径
+  Future<void> updateYoutubeDownloadPath(String path) async {
+    _config['youtubeDownloadPath'] = path;
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新YouTube视频质量
+  Future<void> setYouTubeVideoQuality(String quality) async {
+    _config['youtubeVideoQuality'] = quality;
     await saveConfig();
     notifyListeners();
   }

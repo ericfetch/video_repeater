@@ -6,9 +6,15 @@ import '../services/message_service.dart';
 import '../services/config_service.dart';
 import '../models/subtitle_model.dart';
 import 'subtitle_selection_area.dart';
+import 'package:path/path.dart' as path;
 
 class SubtitleControlWidget extends StatefulWidget {
-  const SubtitleControlWidget({super.key});
+  final VideoService? videoService;
+  
+  const SubtitleControlWidget({
+    super.key,
+    this.videoService,
+  });
   
   @override
   SubtitleControlWidgetState createState() => SubtitleControlWidgetState();
@@ -39,12 +45,16 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
     super.initState();
     // 延迟初始化，确保Provider已经准备好
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _initializeValues();
+      if (mounted) {
+        _initializeValues();
+      }
     });
   }
   
   void _initializeValues() {
-    final videoService = Provider.of<VideoService>(context, listen: false);
+    if (!mounted) return;
+    
+    final videoService = widget.videoService ?? Provider.of<VideoService>(context, listen: false);
     final configService = Provider.of<ConfigService>(context, listen: false);
     final player = videoService.player;
     if (player != null) {
@@ -79,9 +89,48 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
     }
   }
   
+  // 清理YouTube字幕文本中的特殊标签
+  String _cleanSubtitleText(String text) {
+    // 移除时间戳标签，如<00:00:31.359>
+    text = text.replaceAll(RegExp(r'<\d+:\d+:\d+\.\d+>'), '');
+    // 移除<c>和</c>标签
+    text = text.replaceAll(RegExp(r'</?c>'), '');
+    // 移除其他可能的HTML标签
+    text = text.replaceAll(RegExp(r'<[^>]*>'), '');
+    // 完全移除换行符
+    text = text.replaceAll('\n', '');
+    return text;
+  }
+  
+  // 添加单词到生词本
+  void _addToVocabulary(BuildContext context, String word) {
+    if (word.isEmpty) return;
+    
+    // 获取视频服务
+    final videoService = widget.videoService ?? Provider.of<VideoService>(context, listen: false);
+    
+    // 获取当前字幕文本
+    final currentSubtitle = videoService.currentSubtitle;
+    if (currentSubtitle == null) return;
+    
+    // 获取生词本服务
+    final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+    
+    // 添加单词到生词本
+    vocabularyService.addWordToVocabulary(
+      word, 
+      _cleanSubtitleText(currentSubtitle.text),
+      videoService.currentVideoPath,
+    );
+    
+    // 使用通用消息服务显示提示
+    final messageService = Provider.of<MessageService>(context, listen: false);
+    messageService.showSuccess('已添加 "$word" 到生词本');
+  }
+  
   @override
   Widget build(BuildContext context) {
-    final videoService = Provider.of<VideoService>(context);
+    final videoService = widget.videoService ?? Provider.of<VideoService>(context);
     final vocabularyService = Provider.of<VocabularyService>(context);
     final currentSubtitle = videoService.currentSubtitle;
     final player = videoService.player;
@@ -148,14 +197,23 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                 trackShape: CustomTrackShape(),
               ),
               child: Slider(
-                value: videoService.currentPosition.inMilliseconds.toDouble(),
+                value: videoService.currentPosition.inMilliseconds.toDouble().clamp(
+                  0,
+                  videoService.duration.inMilliseconds > 0 
+                    ? videoService.duration.inMilliseconds.toDouble()
+                    : 1.0
+                ),
                 min: 0,
                 max: videoService.duration.inMilliseconds > 0 
                   ? videoService.duration.inMilliseconds.toDouble()
                   : 1.0, // 防止除以零错误
                 onChanged: (value) {
                   final position = Duration(milliseconds: value.toInt());
-                  videoService.player?.seek(position);
+                  if (videoService.isYouTubeVideo) {
+                    videoService.seek(position);
+                  } else {
+                    videoService.player?.seek(position);
+                  }
                 },
               ),
             ),
@@ -203,7 +261,11 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                                 _lastVolume = _currentVolume;
                                 _currentVolume = 0;
                               });
-                              player.setVolume(0);
+                              if (videoService.isYouTubeVideo) {
+                                videoService.setVolume(0);
+                              } else {
+                                player.setVolume(0);
+                              }
                               final messageService = Provider.of<MessageService>(context, listen: false);
                               messageService.showMessage('静音');
                             } else {
@@ -212,7 +274,11 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                               setState(() {
                                 _currentVolume = volumeToRestore;
                               });
-                              player.setVolume(volumeToRestore);
+                              if (videoService.isYouTubeVideo) {
+                                videoService.setVolume(volumeToRestore);
+                              } else {
+                                player.setVolume(volumeToRestore);
+                              }
                               final messageService = Provider.of<MessageService>(context, listen: false);
                               messageService.showMessage('音量: ${volumeToRestore.toInt()}%');
                             }
@@ -242,7 +308,11 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                                   _lastVolume = value; // 更新上次音量
                                 }
                               });
-                              player.setVolume(value);
+                              if (videoService.isYouTubeVideo) {
+                                videoService.setVolume(value);
+                              } else {
+                                player.setVolume(value);
+                              }
                             },
                           ),
                         ),
@@ -275,7 +345,11 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                                         setState(() {
                                           _currentRate = rate;
                                         });
-                                        player.setRate(rate);
+                                        if (videoService.isYouTubeVideo) {
+                                          videoService.setRate(rate);
+                                        } else {
+                                          player.setRate(rate);
+                                        }
                                         final messageService = Provider.of<MessageService>(context, listen: false);
                                         messageService.showMessage('播放速度: ${rate}x');
                                       },
@@ -311,7 +385,11 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                                       setState(() {
                                         _currentRate = rate;
                                       });
-                                      player.setRate(rate);
+                                      if (videoService.isYouTubeVideo) {
+                                        videoService.setRate(rate);
+                                      } else {
+                                        player.setRate(rate);
+                                      }
                                       final messageService = Provider.of<MessageService>(context, listen: false);
                                       messageService.showMessage('播放速度: ${rate}x');
                                     },
@@ -483,7 +561,7 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                     builder: (context, configService, child) {
                       return Container(
                         margin: const EdgeInsets.symmetric(horizontal: 4.0),
-                        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
                         decoration: BoxDecoration(
                           color: configService.subtitleBackgroundColor,
                           borderRadius: BorderRadius.circular(4.0),
@@ -520,34 +598,36 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                             
                             // 字幕文本 - 使用带右键菜单的文本区域
                             Expanded(
-                              child: currentSubtitle != null
-                                ? SubtitleSelectionArea(
-                                    subtitle: currentSubtitle,
-                                    onSaveWord: (word) {
-                                      vocabularyService.addWordToVocabulary(
-                                        word, 
-                                        currentSubtitle.text, 
-                                        videoService.currentVideoPath ?? ''
-                                      );
-                                      final messageService = Provider.of<MessageService>(context, listen: false);
-                                      messageService.showMessage('已添加到生词本: $word');
-                                    },
-                                    isBlurred: _isSubtitleBlurred,
-                                    fontSize: configService.subtitleFontSize,
-                                    fontWeight: configService.subtitleFontWeight,
-                                    textColor: configService.subtitleColor,
-                                  )
-                                : Center(
-                                    child: Text(
-                                      passedSubtitles > 0 
-                                        ? '已播放 $passedSubtitles 条字幕'
-                                        : '等待字幕...',
-                                      style: const TextStyle(
-                                        color: Colors.grey,
-                                        fontStyle: FontStyle.italic,
+                              child: Container(
+                                alignment: Alignment.centerLeft, // 垂直居中，水平左对齐
+                                child: currentSubtitle != null
+                                  ? SubtitleSelectionArea(
+                                      subtitle: SubtitleEntry(
+                                        index: currentSubtitle.index,
+                                        start: currentSubtitle.start,
+                                        end: currentSubtitle.end,
+                                        text: _cleanSubtitleText(currentSubtitle.text), // 直接在这里清理文本
+                                      ),
+                                      onSaveWord: (word) {
+                                        _addToVocabulary(context, word);
+                                      },
+                                      isBlurred: _isSubtitleBlurred,
+                                      fontSize: configService.subtitleFontSize,
+                                      fontWeight: configService.subtitleFontWeight,
+                                      textColor: configService.subtitleColor,
+                                    )
+                                  : Center(
+                                      child: Text(
+                                        passedSubtitles > 0 
+                                          ? '已播放 $passedSubtitles 条字幕'
+                                          : '等待字幕...',
+                                        style: const TextStyle(
+                                          color: Colors.grey,
+                                          fontStyle: FontStyle.italic,
+                                        ),
                                       ),
                                     ),
-                                  ),
+                              ),
                             ),
                           ],
                         ),

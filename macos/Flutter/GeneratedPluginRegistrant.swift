@@ -5,6 +5,7 @@
 import FlutterMacOS
 import Foundation
 
+import desktop_webview_window
 import media_kit_video
 import package_info_plus
 import path_provider_foundation
@@ -13,9 +14,11 @@ import shared_preferences_foundation
 import url_launcher_macos
 import volume_controller
 import wakelock_plus
+import webview_flutter_wkwebview
 import window_manager
 
 func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
+  DesktopWebviewWindowPlugin.register(with: registry.registrar(forPlugin: "DesktopWebviewWindowPlugin"))
   MediaKitVideoPlugin.register(with: registry.registrar(forPlugin: "MediaKitVideoPlugin"))
   FPPPackageInfoPlusPlugin.register(with: registry.registrar(forPlugin: "FPPPackageInfoPlusPlugin"))
   PathProviderPlugin.register(with: registry.registrar(forPlugin: "PathProviderPlugin"))
@@ -24,5 +27,6 @@ func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
   UrlLauncherPlugin.register(with: registry.registrar(forPlugin: "UrlLauncherPlugin"))
   VolumeControllerPlugin.register(with: registry.registrar(forPlugin: "VolumeControllerPlugin"))
   WakelockPlusMacosPlugin.register(with: registry.registrar(forPlugin: "WakelockPlusMacosPlugin"))
+  WebViewFlutterPlugin.register(with: registry.registrar(forPlugin: "WebViewFlutterPlugin"))
   WindowManagerPlugin.register(with: registry.registrar(forPlugin: "WindowManagerPlugin"))
 }

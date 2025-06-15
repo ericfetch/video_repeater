@@ -6,15 +6,25 @@ import 'dart:io';
 import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
+import 'package:hive/hive.dart';
 import 'services/video_service.dart';
 import 'services/history_service.dart';
-import 'services/vocabulary_service.dart';
+import 'services/vocabulary_service.dart' as vocabService;
 import 'services/message_service.dart';
 import 'services/config_service.dart';
 import 'services/app_services.dart';
+import 'services/download_info_service.dart';
+import 'services/dictionary_service.dart';
 import 'models/history_model.dart';
+import 'models/dictionary_word.dart';
+import 'models/vocabulary_model.dart';
 import 'screens/home_screen.dart';
 import 'screens/windows_requirements_screen.dart';
+import 'screens/dictionary_management_screen.dart';
+import 'screens/vocabulary_screen.dart';
+import 'screens/config_screen.dart';
+import 'screens/history_screen.dart';
 
 // 自定义文本选择控制器，禁用系统默认菜单
 class NoSelectionTextEditingController extends TextEditingController {
@@ -37,6 +47,49 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // 初始化Hive和注册适配器
+  try {
+    debugPrint('开始初始化Hive...');
+    final appDocumentDir = await getApplicationDocumentsDirectory();
+    Hive.init(appDocumentDir.path);
+    
+    // 确保在应用启动时注册所有适配器
+    if (!Hive.isAdapterRegistered(1)) {
+      Hive.registerAdapter(VideoHistoryAdapter());
+      debugPrint('VideoHistoryAdapter注册成功，typeId=1');
+    }
+    
+    if (!Hive.isAdapterRegistered(2)) {
+      Hive.registerAdapter(DictionaryWordAdapter());
+      debugPrint('DictionaryWordAdapter注册成功，typeId=2');
+    }
+    
+    // 注册VocabularyWord和VocabularyList适配器
+    if (!Hive.isAdapterRegistered(4)) {
+      Hive.registerAdapter(vocabService.VocabularyWordAdapter());
+      debugPrint('VocabularyWordAdapter注册成功，typeId=4');
+    }
+    
+    if (!Hive.isAdapterRegistered(5)) {
+      Hive.registerAdapter(vocabService.VocabularyListAdapter());
+      debugPrint('VocabularyListAdapter注册成功，typeId=5');
+    }
+    
+    if (!Hive.isAdapterRegistered(16)) {
+      Hive.registerAdapter(DateTimeAdapter());
+      debugPrint('DateTimeAdapter注册成功，typeId=16');
+    }
+    
+    if (!Hive.isAdapterRegistered(17)) {
+      Hive.registerAdapter(DurationAdapter());
+      debugPrint('DurationAdapter注册成功，typeId=17');
+    }
+    
+    debugPrint('Hive初始化完成');
+  } catch (e) {
+    debugPrint('Hive初始化失败: $e');
+  }
   
   // 初始化MediaKit
   try {
@@ -75,8 +128,8 @@ void main() async {
   );
   
   // 添加窗口关闭事件监听
-  windowManager.setPreventClose(true);
-  windowManager.addListener(WindowManagerListener());
+  // windowManager.setPreventClose(true);
+  // windowManager.addListener(WindowManagerListener());
   
   await windowManager.waitUntilReadyToShow(windowOptions, () async {
     await windowManager.show();
@@ -95,15 +148,33 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => VideoService()),
         ChangeNotifierProvider(create: (_) => HistoryService()),
-        ChangeNotifierProvider(create: (_) => VocabularyService()),
+        ChangeNotifierProvider(create: (_) => vocabService.VocabularyService()),
         ChangeNotifierProvider(create: (_) => MessageService()),
         ChangeNotifierProvider(create: (_) => ConfigService()),
+        ChangeNotifierProvider(create: (_) => DownloadInfoService()),
+        ChangeNotifierProvider(create: (_) => DictionaryService()),
       ],
       child: Consumer<ConfigService>(
         builder: (context, configService, child) {
           // 初始化VideoService和ConfigService的关联
           final videoService = Provider.of<VideoService>(context, listen: false);
           videoService.setConfigService(configService);
+          
+          // 初始化下载信息服务
+          final downloadInfoService = Provider.of<DownloadInfoService>(context, listen: false);
+          videoService.setDownloadInfoService(downloadInfoService);
+          
+          // 初始化词典服务
+          final dictionaryService = Provider.of<DictionaryService>(context, listen: false);
+          dictionaryService.initialize();
+          
+          // 初始化生词本服务
+          final vocabularyService = Provider.of<vocabService.VocabularyService>(context, listen: false);
+          vocabularyService.initialize();
+          
+          // 初始化历史记录服务
+          final historyService = Provider.of<HistoryService>(context, listen: false);
+          historyService.initialize();
           
           // 初始化全局服务引用
           AppServices.initServices(context);
@@ -126,6 +197,12 @@ class MyApp extends StatelessWidget {
             builder: (context, child) {
               // 使用自定义Builder显示全局消息
               return MessageOverlay(child: child!);
+            },
+            routes: {
+              '/dictionary': (context) => const DictionaryManagementScreen(),
+              '/vocabulary': (context) => const VocabularyScreen(),
+              '/history': (context) => const HistoryScreen(),
+              '/config': (context) => const ConfigScreen(),
             },
             home: FutureBuilder<bool>(
               future: _checkWindowsRequirements(),
@@ -258,28 +335,54 @@ class MessageOverlay extends StatelessWidget {
                   left: 0,
                   right: 0,
                   child: Center(
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 20),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.7),
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.2),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween<double>(begin: 0.0, end: 1.0),
+                      duration: const Duration(milliseconds: 300),
+                      builder: (context, value, child) {
+                        return Opacity(
+                          opacity: value,
+                          child: Transform.translate(
+                            offset: Offset(0, (1 - value) * -20),
+                            child: child,
                           ),
-                        ],
-                      ),
-                      child: Text(
-                        messageService.message!,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
+                        );
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 20),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: _getMessageColor(messageService.messageType).withOpacity(0.9),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.2),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
                         ),
-                        textAlign: TextAlign.center,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _getMessageIcon(messageService.messageType),
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text(
+                                messageService.message!,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -290,83 +393,34 @@ class MessageOverlay extends StatelessWidget {
       },
     );
   }
-}
-
-// 窗口管理器监听器
-class WindowManagerListener extends WindowListener {
-  @override
-  void onWindowClose() async {
-    bool isPreventClose = false;
-    
-    try {
-      // 显示保存进度提示
-      final messageService = AppServices.messageService;
-      if (messageService != null) {
-        messageService.showMessage('正在保存播放进度...', durationMs: 2000);
-      }
-      
-      // 暂停视频播放
-      final videoService = AppServices.videoService;
-      if (videoService != null && videoService.player != null && videoService.player!.state.playing) {
-        debugPrint('窗口关闭事件触发，暂停视频并保存当前播放状态');
-        await videoService.player!.pause();
-        debugPrint('已暂停视频播放');
-      }
-      
-      // 保存当前播放状态
-      await saveLastPlayStateGlobal();
-      
-      // 短暂延迟，确保用户能看到保存提示
-      await Future.delayed(const Duration(milliseconds: 800));
-      
-      // 允许窗口关闭
-      windowManager.destroy();
-    } catch (e) {
-      debugPrint('窗口关闭处理错误: $e');
-      // 出错时也允许关闭窗口
-      if (!isPreventClose) {
-        windowManager.destroy();
-      }
+  
+  // 根据消息类型返回颜色
+  Color _getMessageColor(MessageType type) {
+    switch (type) {
+      case MessageType.success:
+        return Colors.green.shade800;
+      case MessageType.error:
+        return Colors.red.shade800;
+      case MessageType.warning:
+        return Colors.orange.shade800;
+      case MessageType.info:
+      default:
+        return Colors.blue.shade800;
     }
   }
-}
-
-/// 全局方法：保存最后的播放状态
-/// 在应用关闭时调用
-Future<void> saveLastPlayStateGlobal() async {
-  try {
-    debugPrint('应用关闭，保存最后播放状态');
-    
-    // 获取服务实例
-    final videoService = AppServices.videoService;
-    final historyService = AppServices.historyService;
-    
-    // 确保服务和视频已加载
-    if (videoService != null && 
-        historyService != null && 
-        videoService.player != null && 
-        videoService.currentVideoPath != null) {
-      
-      final videoName = path.basename(videoService.currentVideoPath!);
-      final position = videoService.currentPosition;
-      final subtitlePath = videoService.currentSubtitlePath ?? '';
-      final subtitleTimeOffset = videoService.subtitleTimeOffset;
-      
-      final lastState = VideoHistory(
-        videoPath: videoService.currentVideoPath!,
-        subtitlePath: subtitlePath,
-        videoName: videoName,
-        lastPosition: position,
-        timestamp: DateTime.now(),
-        subtitleTimeOffset: subtitleTimeOffset,
-      );
-      
-      await historyService.saveLastPlayState(lastState);
-      debugPrint('成功保存最后播放状态: $videoName - ${position.inSeconds}秒, 字幕偏移: ${subtitleTimeOffset/1000}秒');
-    } else {
-      debugPrint('无法保存播放状态：未加载视频或播放器未初始化');
+  
+  // 根据消息类型返回图标
+  IconData _getMessageIcon(MessageType type) {
+    switch (type) {
+      case MessageType.success:
+        return Icons.check_circle_outline;
+      case MessageType.error:
+        return Icons.error_outline;
+      case MessageType.warning:
+        return Icons.warning_amber_rounded;
+      case MessageType.info:
+      default:
+        return Icons.info_outline;
     }
-  } catch (e) {
-    debugPrint('保存最后播放状态时发生错误: $e');
   }
 }

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:file_picker/file_picker.dart';
 import '../services/config_service.dart';
 import '../services/video_service.dart';
+import '../services/message_service.dart';
 
 class ConfigScreen extends StatelessWidget {
   const ConfigScreen({super.key});
@@ -35,6 +37,7 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
   final _loopWaitIntervalController = TextEditingController();
   final _subtitleFontSizeController = TextEditingController();
   final _subtitleSuffixesController = TextEditingController();
+  final _youtubeDownloadPathController = TextEditingController();
   
   // 设置值
   bool _isDarkMode = false;
@@ -65,6 +68,7 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
     _loopWaitIntervalController.text = configService.loopWaitInterval.toString();
     _subtitleFontSizeController.text = configService.subtitleFontSize.toString();
     _subtitleSuffixesController.text = configService.subtitleSuffixes.join(', ');
+    _youtubeDownloadPathController.text = configService.youtubeDownloadPath;
     
     // 更新设置值
     setState(() {
@@ -82,6 +86,7 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
     _loopWaitIntervalController.dispose();
     _subtitleFontSizeController.dispose();
     _subtitleSuffixesController.dispose();
+    _youtubeDownloadPathController.dispose();
     
     // 恢复视频播放状态
     if (widget.wasPlaying) {
@@ -135,15 +140,17 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
       debugPrint('解析字幕后缀失败: $e');
     }
     
+    // 保存YouTube下载路径
+    configService.updateYoutubeDownloadPath(_youtubeDownloadPathController.text);
+    
     // 保存其他设置
     configService.updateSubtitleFontWeight(_isBoldFont);
     configService.updateAutoMatchSubtitle(_autoMatchSubtitle);
     configService.updateSubtitleMatchMode(_subtitleMatchMode);
     configService.updateDarkMode(_isDarkMode);
     
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('设置已保存')),
-    );
+    final messageService = Provider.of<MessageService>(context, listen: false);
+    messageService.showSuccess('设置已保存');
   }
   
   // 重置为默认设置
@@ -170,6 +177,16 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
         ],
       ),
     );
+  }
+
+  // 选择YouTube下载目录
+  Future<void> _selectYoutubeDownloadDirectory() async {
+    String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
+    if (selectedDirectory != null) {
+      setState(() {
+        _youtubeDownloadPathController.text = selectedDirectory;
+      });
+    }
   }
 
   @override
@@ -415,6 +432,55 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
                   ),
                 ),
               ),
+              
+              const SizedBox(height: 24),
+              
+              // YouTube设置
+              const Text(
+                'YouTube设置',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const Divider(),
+              
+              // YouTube下载路径
+              StatefulBuilder(
+                builder: (context, setState) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('YouTube视频下载路径'),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _youtubeDownloadPathController,
+                              decoration: const InputDecoration(
+                                hintText: '留空使用临时目录',
+                                border: OutlineInputBorder(),
+                              ),
+                              readOnly: true,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton(
+                            onPressed: _selectYoutubeDownloadDirectory,
+                            child: const Text('选择'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        '选择保存YouTube视频的目录，留空则保存到临时目录',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              
+
               
               const SizedBox(height: 24),
               

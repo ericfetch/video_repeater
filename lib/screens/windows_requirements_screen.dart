@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:provider/provider.dart';
+import '../services/message_service.dart';
 
 class WindowsRequirementsScreen extends StatelessWidget {
   const WindowsRequirementsScreen({super.key});
@@ -106,9 +108,8 @@ class _RequirementItem extends StatelessWidget {
                   await launchUrl(uri);
                 } else {
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('无法打开链接: $url')),
-                    );
+                    final messageService = Provider.of<MessageService>(context, listen: false);
+                    messageService.showError('无法打开链接: $url');
                   }
                 }
               },

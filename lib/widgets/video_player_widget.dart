@@ -18,22 +18,35 @@ class VideoPlayerWidget extends StatefulWidget {
 class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   // 视频控制器
   VideoController? _videoController;
+  bool _disposed = false;
 
   @override
   void initState() {
     super.initState();
     // 延迟初始化，确保Provider已经准备好
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _initializeController();
+      if (!_disposed && mounted) {
+        _initializeController();
+      }
     });
   }
   
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+  
   void _initializeController() {
-    final player = Provider.of<VideoService>(context, listen: false).player;
-    if (player != null) {
-      setState(() {
-        _videoController = VideoController(player);
-      });
+    if (!mounted) return;
+    
+    final videoService = Provider.of<VideoService>(context, listen: false);
+    if (videoService.player != null) {
+      if (mounted) {
+        setState(() {
+          _videoController = VideoController(videoService.player!);
+        });
+      }
     }
   }
 
@@ -46,49 +59,104 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     
     // 如果Player实例变化，重新初始化控制器
     if (player != null && (_videoController == null || _videoController!.player != player)) {
-      _videoController = VideoController(player);
+      if (mounted) {
+        _videoController = VideoController(player);
+      }
     }
     
     // 显示错误信息
     if (errorMessage != null) {
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.error_outline, color: Colors.red[300], size: 48),
-            const SizedBox(height: 16),
-            Text(
-              errorMessage,
-              style: const TextStyle(color: Colors.white70),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: videoService.clearError,
-              child: const Text('确定'),
-            ),
-          ],
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.3),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.error_outline, color: Colors.red[300], size: 64),
+              const SizedBox(height: 16),
+              Text(
+                errorMessage,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: videoService.clearError,
+                icon: const Icon(Icons.refresh),
+                label: const Text('重试'),
+                style: ElevatedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  backgroundColor: Colors.blue,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
     
     // 显示加载状态
     if (isLoading) {
-      return const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(),
-            const SizedBox(height: 16),
-            Text(
-              '正在加载视频...',
-              style: const TextStyle(color: Colors.white70),
-            ),
-          ],
+      return Center(
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.3),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 48,
+                height: 48,
+                child: CircularProgressIndicator(
+                  strokeWidth: 4,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                '正在加载视频...',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
     
+    // 视频播放 (本地和YouTube视频都使用本地播放器)
     if (player == null || player.state.duration == Duration.zero) {
       return const Center(
         child: Text(
