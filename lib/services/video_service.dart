@@ -948,10 +948,31 @@ class VideoService extends ChangeNotifier {
       notifyListeners();
       
       // 获取字幕内容
-      final subtitlePath = await _youtubeService.downloadSubtitles(videoId, onStatusUpdate: (status) {
-        _downloadStatus = status;
-        notifyListeners();
-      });
+      String? subtitlePath;
+      
+      // 检查是否有用户选择的字幕轨道
+      if (_downloadInfoService != null && _downloadInfoService!.selectedSubtitleTrack != null) {
+        // 使用用户选择的字幕轨道
+        final selectedTrack = _downloadInfoService!.selectedSubtitleTrack!;
+        debugPrint('使用用户选择的字幕轨道: ${selectedTrack['name']}');
+        subtitlePath = await _youtubeService.downloadSpecificSubtitle(
+          videoId, 
+          selectedTrack,
+          onStatusUpdate: (status) {
+            _downloadStatus = status;
+            notifyListeners();
+          }
+        );
+      } else {
+        // 使用默认字幕（通常是自动检测或首选语言）
+        subtitlePath = await _youtubeService.downloadSubtitles(
+          videoId, 
+          onStatusUpdate: (status) {
+            _downloadStatus = status;
+            notifyListeners();
+          }
+        );
+      }
       
       // 如果下载成功，从文件中加载字幕内容
       if (subtitlePath != null && await File(subtitlePath).exists()) {

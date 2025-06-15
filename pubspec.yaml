@@ -77,6 +77,8 @@ dependencies:
   # 词形还原
   english_words: ^4.0.0
   stemmer: ^2.2.0
+  dio: ^5.8.0+1
+  process_run: ^1.2.4
 
 dev_dependencies:
   flutter_test:
