@@ -871,9 +871,9 @@ class _DictionaryManagementScreenState extends State<DictionaryManagementScreen>
                   },
                   hint: const Text('过滤'),
                 ),
-              ],
+                ],
+              ),
             ),
-          ),
           
           // 选中单词信息
           if (_selectedWords.isNotEmpty)

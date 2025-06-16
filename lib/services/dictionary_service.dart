@@ -53,6 +53,47 @@ class DictionaryService extends ChangeNotifier {
       }
       
       try {
+        // 处理可能的数据迁移问题，尝试先删除旧盒子
+        try {
+          final boxDir = await getApplicationDocumentsDirectory();
+          final dictionaryBoxPath = '${boxDir.path}/$_dictionaryBoxName.hive';
+          final vocabularyBoxPath = '${boxDir.path}/$_vocabularyBoxName.hive';
+          
+          // 检查文件是否存在，存在则尝试删除
+          final dictionaryFile = File(dictionaryBoxPath);
+          final vocabularyFile = File(vocabularyBoxPath);
+          
+          if (await dictionaryFile.exists()) {
+            // 在删除前先备份
+            final backupPath = '${dictionaryBoxPath}_backup';
+            await dictionaryFile.copy(backupPath);
+            debugPrint('已备份词典数据到: $backupPath');
+            
+            // 尝试打开盒子，如果打开失败则删除
+            try {
+              await Hive.openBox<DictionaryWord>(_dictionaryBoxName);
+            } catch (e) {
+              debugPrint('打开词典盒子失败，将删除并重新创建: $e');
+              await Hive.deleteBoxFromDisk(_dictionaryBoxName);
+            }
+          }
+          
+          if (await vocabularyFile.exists()) {
+            final backupPath = '${vocabularyBoxPath}_backup';
+            await vocabularyFile.copy(backupPath);
+            debugPrint('已备份生词本数据到: $backupPath');
+            
+            try {
+              await Hive.openBox<DictionaryWord>(_vocabularyBoxName);
+            } catch (e) {
+              debugPrint('打开生词本盒子失败，将删除并重新创建: $e');
+              await Hive.deleteBoxFromDisk(_vocabularyBoxName);
+            }
+          }
+        } catch (e) {
+          debugPrint('处理数据迁移时出错: $e');
+        }
+        
         // 打开盒子
         debugPrint('尝试打开词典盒子: $_dictionaryBoxName');
         _dictionaryBox = await Hive.openBox<DictionaryWord>(_dictionaryBoxName);
@@ -63,6 +104,19 @@ class DictionaryService extends ChangeNotifier {
         debugPrint('生词本盒子打开成功，包含${_vocabularyBox.length}条记录');
       } catch (e) {
         debugPrint('打开盒子失败: $e');
+        // 如果打开失败，尝试完全重置
+        try {
+          await Hive.deleteBoxFromDisk(_dictionaryBoxName);
+          await Hive.deleteBoxFromDisk(_vocabularyBoxName);
+          
+          _dictionaryBox = await Hive.openBox<DictionaryWord>(_dictionaryBoxName);
+          _vocabularyBox = await Hive.openBox<DictionaryWord>(_vocabularyBoxName);
+          
+          debugPrint('已重置并重新创建盒子');
+        } catch (e2) {
+          debugPrint('重置盒子失败: $e2');
+          throw Exception('无法初始化词典数据: $e2');
+        }
       }
       
       _isInitialized = true;
