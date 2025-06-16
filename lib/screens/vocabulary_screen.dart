@@ -4,10 +4,10 @@ import 'package:provider/provider.dart';
 import '../services/vocabulary_service.dart';
 import '../models/vocabulary_model.dart';
 import '../services/dictionary_service.dart';
-import '../services/message_service.dart';
 import '../models/dictionary_word.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
+import 'package:file_picker/file_picker.dart';
 
 class VocabularyScreen extends StatefulWidget {
   const VocabularyScreen({super.key});
@@ -142,8 +142,12 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
       });
       
       // 显示成功消息
-      final messageService = Provider.of<MessageService>(context, listen: false);
-      messageService.showSuccess('已删除 ${wordToVideoMap.length} 个单词');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已删除 ${wordToVideoMap.length} 个单词'),
+          backgroundColor: Colors.green,
+        ),
+      );
       
       debugPrint('删除完成');
     } catch (e) {
@@ -151,8 +155,12 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
       if (mounted) Navigator.of(context).pop();
       
       // 显示错误消息
-      final messageService = Provider.of<MessageService>(context, listen: false);
-      messageService.showError('删除单词时出错: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('删除单词时出错: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
       
       debugPrint('删除失败: $e');
       debugPrintStack(stackTrace: StackTrace.current);
@@ -176,9 +184,13 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
     // 复制到剪贴板
     await Clipboard.setData(ClipboardData(text: buffer.toString()));
     
-    // 使用通用消息服务显示提示
-    final messageService = Provider.of<MessageService>(context, listen: false);
-    messageService.showSuccess('已复制 ${_selectedWords.length} 个单词到剪贴板');
+    // 显示提示
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已复制 ${_selectedWords.length} 个单词到剪贴板'),
+        backgroundColor: Colors.green,
+      ),
+    );
     
     // 退出选择模式
     setState(() {
@@ -189,8 +201,12 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
   
   void _copyWord(String word) {
     Clipboard.setData(ClipboardData(text: word));
-    final messageService = Provider.of<MessageService>(context, listen: false);
-    messageService.showInfo('已复制: $word');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已复制: $word'),
+        backgroundColor: Colors.blue,
+      ),
+    );
   }
   
   // 显示编辑单词对话框
@@ -259,10 +275,6 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
               
               Navigator.of(context).pop();
               setState(() {});
-              
-              // 使用通用消息服务显示提示
-              final messageService = Provider.of<MessageService>(context, listen: false);
-              messageService.showSuccess('单词已更新: ${word.word} → $newWord');
             },
             child: const Text('保存'),
           ),
@@ -274,18 +286,25 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
   // 保存文件到本地
   Future<void> _saveToFile(String content, String defaultFileName) async {
     try {
-      // 获取应用文档目录
-      final directory = await getApplicationDocumentsDirectory();
-      final filePath = '${directory.path}/$defaultFileName';
+      // 让用户选择保存位置
+      String? outputPath = await FilePicker.platform.saveFile(
+        dialogTitle: '保存文件',
+        fileName: defaultFileName,
+      );
+      
+      if (outputPath == null) {
+        // 用户取消了选择
+        return;
+      }
       
       // 保存文件
-      final file = File(filePath);
+      final file = File(outputPath);
       await file.writeAsString(content);
       
       // 显示成功消息
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('文件已保存到: $filePath'),
+          content: Text('文件已保存到: $outputPath'),
           backgroundColor: Colors.green,
         ),
       );
@@ -306,15 +325,70 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
   // 导出JSON备份
   Future<void> _exportJsonBackup() async {
     try {
-      final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
-      final content = vocabularyService.exportVocabularyAsJSON();
-      await _saveToFile(content, 'vocabulary_backup.json');
+      // 让用户选择保存位置
+      String? outputPath = await FilePicker.platform.saveFile(
+        dialogTitle: '保存生词本备份',
+        fileName: 'vocabulary_backup.json',
+      );
+      
+      if (outputPath == null) {
+        // 用户取消了选择
+        return;
+      }
+      
+      // 显示进度指示器
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('正在导出数据...'),
+            ],
+          ),
+        ),
+      );
+      
+      try {
+        final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+        final content = vocabularyService.exportVocabularyAsJSON();
+        
+        // 保存到用户选择的位置
+        final file = File(outputPath);
+        await file.writeAsString(content);
+        
+        // 关闭进度指示器
+        if (mounted) Navigator.of(context).pop();
+        
+        // 显示成功消息
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('生词本已保存到: $outputPath'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } catch (e) {
+        // 确保进度指示器被关闭
+        if (mounted) Navigator.of(context).pop();
+        
+        debugPrint('导出JSON备份失败: $e');
+        debugPrintStack(stackTrace: StackTrace.current);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('导出JSON备份失败: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } catch (e) {
-      debugPrint('导出JSON备份失败: $e');
+      debugPrint('选择保存位置失败: $e');
       debugPrintStack(stackTrace: StackTrace.current);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('导出JSON备份失败: ${e.toString()}'),
+          content: Text('选择保存位置失败: ${e.toString()}'),
           backgroundColor: Colors.red,
         ),
       );
@@ -324,21 +398,19 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
   // 从文件导入数据
   Future<void> _importFromFile() async {
     try {
-      // 获取应用文档目录
-      final directory = await getApplicationDocumentsDirectory();
-      final filePath = '${directory.path}/vocabulary_backup.json';
+      // 让用户选择要导入的文件
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+        dialogTitle: '选择生词本备份文件',
+      );
       
-      // 检查文件是否存在
-      final file = File(filePath);
-      if (!await file.exists()) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('备份文件不存在，请先导出备份'),
-            backgroundColor: Colors.red,
-          ),
-        );
+      if (result == null || result.files.single.path == null) {
+        // 用户取消了选择
         return;
       }
+      
+      final filePath = result.files.single.path!;
       
       // 显示进度指示器
       showDialog(
@@ -360,6 +432,7 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
         final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
         
         // 读取文件内容
+        final file = File(filePath);
         final content = await file.readAsString();
         
         // 导入数据
@@ -400,14 +473,71 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
         );
       }
     } catch (e) {
-      debugPrint('导入文件失败: $e');
+      debugPrint('选择导入文件失败: $e');
       debugPrintStack(stackTrace: StackTrace.current);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('导入文件失败: ${e.toString()}'),
+          content: Text('选择导入文件失败: ${e.toString()}'),
           backgroundColor: Colors.red,
         ),
       );
+    }
+  }
+  
+  // 修复数据库部分
+  Future<void> _repairDatabase() async {
+    // 显示进度指示器
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('正在检查和修复数据库...'),
+          ],
+        ),
+      ),
+    );
+    
+    try {
+      final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+      final results = await vocabularyService.safeRepairVocabularyData();
+      
+      // 关闭进度指示器
+      if (mounted) Navigator.of(context).pop();
+      
+      if (results['fixedLists']! > 0 || results['fixedWords']! > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('数据库修复完成，修复了 ${results['fixedLists']} 个生词本和 ${results['fixedWords']} 个单词'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('数据库检查完成，未发现问题'),
+            backgroundColor: Colors.blue,
+          ),
+        );
+      }
+      
+      setState(() {});
+    } catch (e) {
+      // 关闭进度指示器
+      if (mounted) Navigator.of(context).pop();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('修复数据库时出错: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      debugPrint('修复数据库失败: $e');
+      debugPrintStack(stackTrace: StackTrace.current);
     }
   }
   
@@ -444,14 +574,14 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
           ] else ...[
             // 导入按钮
             IconButton(
-              icon: const Icon(Icons.upload_file),
-              tooltip: '导入备份',
+              icon: const Icon(Icons.file_upload),
+              tooltip: '导入生词本备份',
               onPressed: _importFromFile,
             ),
             // 导出按钮
             IconButton(
-              icon: const Icon(Icons.download),
-              tooltip: '导出备份',
+              icon: const Icon(Icons.file_download),
+              tooltip: '导出生词本备份',
               onPressed: _exportJsonBackup,
             ),
             // 其他操作菜单
@@ -492,48 +622,7 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
                   }
                 } else if (value == 'repair') {
                   // 修复数据库
-                  final messageService = Provider.of<MessageService>(context, listen: false);
-                  messageService.showInfo('正在检查数据库...');
-                  
-                  // 显示进度指示器
-                  showDialog(
-                    context: context,
-                    barrierDismissible: false,
-                    builder: (context) => const AlertDialog(
-                      content: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          CircularProgressIndicator(),
-                          SizedBox(height: 16),
-                          Text('正在检查和修复数据库...'),
-                        ],
-                      ),
-                    ),
-                  );
-                  
-                  try {
-                    final results = await vocabularyService.safeRepairVocabularyData();
-                    
-                    // 关闭进度指示器
-                    Navigator.of(context).pop();
-                    
-                    if (results['fixedLists']! > 0 || results['fixedWords']! > 0) {
-                      messageService.showSuccess(
-                        '数据库修复完成，修复了 ${results['fixedLists']} 个生词本和 ${results['fixedWords']} 个单词'
-                      );
-                    } else {
-                      messageService.showInfo('数据库检查完成，未发现问题');
-                    }
-                    
-                    setState(() {});
-                  } catch (e) {
-                    // 关闭进度指示器
-                    Navigator.of(context).pop();
-                    
-                    messageService.showError('修复数据库时出错: $e');
-                    debugPrint('修复数据库失败: $e');
-                    debugPrintStack(stackTrace: StackTrace.current);
-                  }
+                  await _repairDatabase();
                 }
               },
               itemBuilder: (context) => [
@@ -730,6 +819,11 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                IconButton(
+                  icon: const Icon(Icons.content_copy),
+                  tooltip: '复制单词',
+                  onPressed: () => _copyWord(word.word),
+                ),
                 IconButton(
                   icon: const Icon(Icons.edit),
                   onPressed: () => _showEditWordDialog(context, word),
