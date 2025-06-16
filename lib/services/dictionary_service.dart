@@ -130,6 +130,19 @@ class DictionaryService extends ChangeNotifier {
   // 获取所有词典单词
   List<DictionaryWord> get allWords => _dictionaryBox.values.toList();
   
+  // 根据熟知状态筛选单词
+  List<DictionaryWord> getWordsByFamiliarStatus(bool isFamiliar) {
+    return _dictionaryBox.values.where((word) => word.isFamiliar == isFamiliar).toList();
+  }
+  
+  // 获取所有熟知的单词
+  List<DictionaryWord> get familiarWords => 
+      _dictionaryBox.values.where((word) => word.isFamiliar).toList();
+      
+  // 获取所有未熟知的单词
+  List<DictionaryWord> get unfamiliarWords => 
+      _dictionaryBox.values.where((word) => !word.isFamiliar).toList();
+  
   // 获取所有生词本单词
   List<DictionaryWord> get allVocabularyWords => _vocabularyBox.values.toList();
   
@@ -165,6 +178,40 @@ class DictionaryService extends ChangeNotifier {
   // 检查单词是否在生词本中
   bool isInVocabulary(String wordText) {
     return _vocabularyBox.containsKey(wordText.toLowerCase());
+  }
+  
+  // 标记单词为熟知
+  Future<void> markAsFamiliar(String wordText) async {
+    final word = getWord(wordText.toLowerCase());
+    if (word != null) {
+      word.isFamiliar = true;
+      await _dictionaryBox.put(wordText.toLowerCase(), word);
+      notifyListeners();
+    } else {
+      // 如果词典中没有这个单词，创建一个新的带有熟知标记
+      final newWord = DictionaryWord(
+        word: wordText.toLowerCase(),
+        isFamiliar: true,
+      );
+      await _dictionaryBox.put(wordText.toLowerCase(), newWord);
+      notifyListeners();
+    }
+  }
+  
+  // 取消标记单词为熟知
+  Future<void> unmarkAsFamiliar(String wordText) async {
+    final word = getWord(wordText.toLowerCase());
+    if (word != null) {
+      word.isFamiliar = false;
+      await _dictionaryBox.put(wordText.toLowerCase(), word);
+      notifyListeners();
+    }
+  }
+  
+  // 检查单词是否被标记为熟知
+  bool isFamiliar(String wordText) {
+    final word = getWord(wordText.toLowerCase());
+    return word != null && word.isFamiliar;
   }
   
   // 从JSON文件导入词典
@@ -412,15 +459,19 @@ class DictionaryService extends ChangeNotifier {
   
   // 搜索词典
   List<DictionaryWord> searchDictionary(String query) {
-    if (query.isEmpty) {
-      return allWords;
-    }
-    
     query = query.toLowerCase();
-    return allWords.where((word) => 
+    return _dictionaryBox.values.where((word) => 
       word.word.toLowerCase().contains(query) || 
-      (word.definition?.toLowerCase().contains(query) ?? false)
+      (word.definition != null && word.definition!.toLowerCase().contains(query)) ||
+      (word.partOfSpeech != null && word.partOfSpeech!.toLowerCase().contains(query))
     ).toList();
+  }
+  
+  // 根据熟知状态搜索词典
+  List<DictionaryWord> searchDictionaryWithFamiliar(String query, bool? isFamiliar) {
+    final results = searchDictionary(query);
+    if (isFamiliar == null) return results;
+    return results.where((word) => word.isFamiliar == isFamiliar).toList();
   }
   
   // 清空词典

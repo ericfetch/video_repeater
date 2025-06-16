@@ -25,6 +25,7 @@ import '../screens/youtube_video_screen.dart';
 import '../screens/vocabulary_recovery_screen.dart';
 import '../screens/windows_requirements_screen.dart';
 import '../screens/dictionary_management_screen.dart';
+import '../screens/subtitle_analysis_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -743,6 +744,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         _navigateToVocabularyScreen(context);
                                       },
                                     ),
+                                    // 字幕分析按钮
+                                    _SafeIconButton(
+                                      icon: const Icon(Icons.analytics, color: Colors.white),
+                                      tooltip: '字幕单词分析',
+                                      onPressed: () {
+                                        _navigateToSubtitleAnalysisScreen(context);
+                                      },
+                                    ),
                                      // 词典管理按钮
                                     _SafeIconButton(
                                       icon: const Icon(Icons.menu_book, color: Colors.white),
@@ -1347,8 +1356,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
   
   // 导航到生词本页面
-  void _navigateToVocabularyScreen(BuildContext context) async {
-    await _navigateToScreen(context, '/vocabulary', screenName: '生词本');
+  void _navigateToVocabularyScreen(BuildContext context) {
+    // 禁用自动焦点
+    setState(() {
+      _shouldAutoFocus = false;
+    });
+    
+    Navigator.of(context).pushNamed('/vocabulary');
+  }
+  
+  // 导航到字幕分析页面
+  void _navigateToSubtitleAnalysisScreen(BuildContext context) {
+    // 禁用自动焦点
+    setState(() {
+      _shouldAutoFocus = false;
+    });
+    
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => SubtitleAnalysisScreen(
+          videoService: Provider.of<VideoService>(context, listen: false),
+          vocabularyService: Provider.of<VocabularyService>(context, listen: false),
+          dictionaryService: Provider.of<DictionaryService>(context, listen: false),
+        ),
+      ),
+    );
   }
   
   // 导航到词典管理页面

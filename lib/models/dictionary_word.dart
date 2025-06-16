@@ -27,6 +27,9 @@ class DictionaryWord extends HiveObject {
   
   @HiveField(7)
   Map<String, dynamic>? extraInfo;
+  
+  @HiveField(8)
+  bool isFamiliar;
 
   DictionaryWord({
     required this.word,
@@ -37,6 +40,7 @@ class DictionaryWord extends HiveObject {
     this.phonetic,
     this.cefr,
     this.extraInfo,
+    this.isFamiliar = false,
   });
 
   factory DictionaryWord.fromJson(Map<String, dynamic> json) {
@@ -51,6 +55,7 @@ class DictionaryWord extends HiveObject {
       extraInfo: json['extraInfo'] != null 
           ? Map<String, dynamic>.from(json['extraInfo'] as Map) 
           : null,
+      isFamiliar: json['isFamiliar'] as bool? ?? false,
     );
   }
 
@@ -64,6 +69,7 @@ class DictionaryWord extends HiveObject {
       'phonetic': phonetic,
       'cefr': cefr,
       'extraInfo': extraInfo,
+      'isFamiliar': isFamiliar,
     };
   }
   

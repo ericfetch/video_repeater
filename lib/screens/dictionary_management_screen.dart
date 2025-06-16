@@ -24,6 +24,9 @@ class _DictionaryManagementScreenState extends State<DictionaryManagementScreen>
   bool _showProgressIndicator = false;
   double _progressValue = 0.0;
   
+  // 过滤选项
+  bool? _showFamiliarFilter = null; // null表示显示全部，true只显示熟知，false只显示未熟知
+  
   @override
   void initState() {
     super.initState();
@@ -61,8 +64,8 @@ class _DictionaryManagementScreenState extends State<DictionaryManagementScreen>
     final query = _searchController.text.trim();
     
     setState(() {
-      if (query.isEmpty) {
-        _filteredWords = dictionaryService.allWords;
+      if (_showFamiliarFilter != null) {
+        _filteredWords = dictionaryService.searchDictionaryWithFamiliar(query, _showFamiliarFilter);
       } else {
         _filteredWords = dictionaryService.searchDictionary(query);
       }
@@ -560,6 +563,134 @@ class _DictionaryManagementScreenState extends State<DictionaryManagementScreen>
     // Implementation of _showWordDetails method
   }
   
+  // 批量标记选中的单词为熟知
+  Future<void> _markSelectedWordsAsFamiliar() async {
+    if (_selectedWords.isEmpty) {
+      setState(() {
+        _statusMessage = '请先选择要标记的单词';
+      });
+      return;
+    }
+    
+    // 确认对话框
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认标记'),
+        content: Text('确定要将选中的 ${_selectedWords.length} 个单词标记为熟知吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirmed != true) return;
+    
+    setState(() {
+      _showProgressIndicator = true;
+      _progressValue = 0.0;
+      _statusMessage = '正在标记单词...';
+    });
+    
+    try {
+      final dictionaryService = Provider.of<DictionaryService>(context, listen: false);
+      int count = 0;
+      
+      for (int i = 0; i < _selectedWords.length; i++) {
+        await dictionaryService.markAsFamiliar(_selectedWords[i].word);
+        count++;
+        
+        setState(() {
+          _progressValue = i / _selectedWords.length;
+        });
+      }
+      
+      setState(() {
+        _showProgressIndicator = false;
+        _statusMessage = '成功标记 $count 个单词为熟知';
+      });
+      
+      // 刷新显示
+      _filterWords();
+    } catch (e) {
+      setState(() {
+        _showProgressIndicator = false;
+        _statusMessage = '标记失败: $e';
+      });
+    }
+  }
+  
+  // 批量取消标记选中的单词为熟知
+  Future<void> _unmarkSelectedWordsAsFamiliar() async {
+    if (_selectedWords.isEmpty) {
+      setState(() {
+        _statusMessage = '请先选择要取消标记的单词';
+      });
+      return;
+    }
+    
+    // 确认对话框
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认取消标记'),
+        content: Text('确定要取消选中的 ${_selectedWords.length} 个单词的熟知标记吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirmed != true) return;
+    
+    setState(() {
+      _showProgressIndicator = true;
+      _progressValue = 0.0;
+      _statusMessage = '正在取消标记单词...';
+    });
+    
+    try {
+      final dictionaryService = Provider.of<DictionaryService>(context, listen: false);
+      int count = 0;
+      
+      for (int i = 0; i < _selectedWords.length; i++) {
+        await dictionaryService.unmarkAsFamiliar(_selectedWords[i].word);
+        count++;
+        
+        setState(() {
+          _progressValue = i / _selectedWords.length;
+        });
+      }
+      
+      setState(() {
+        _showProgressIndicator = false;
+        _statusMessage = '成功取消 $count 个单词的熟知标记';
+      });
+      
+      // 刷新显示
+      _filterWords();
+    } catch (e) {
+      setState(() {
+        _showProgressIndicator = false;
+        _statusMessage = '取消标记失败: $e';
+      });
+    }
+  }
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -604,6 +735,12 @@ class _DictionaryManagementScreenState extends State<DictionaryManagementScreen>
                 case 'enrich_all':
                   _enrichAllIncompleteWords();
                   break;
+                case 'mark_familiar':
+                  _markSelectedWordsAsFamiliar();
+                  break;
+                case 'unmark_familiar':
+                  _unmarkSelectedWordsAsFamiliar();
+                  break;
                 case 'clear':
                   _clearDictionary();
                   break;
@@ -629,6 +766,14 @@ class _DictionaryManagementScreenState extends State<DictionaryManagementScreen>
               const PopupMenuItem(
                 value: 'enrich_all',
                 child: Text('查询所有缺失信息的单词'),
+              ),
+              const PopupMenuItem(
+                value: 'mark_familiar',
+                child: Text('标记选中单词为熟知'),
+              ),
+              const PopupMenuItem(
+                value: 'unmark_familiar',
+                child: Text('取消选中单词的熟知标记'),
               ),
               const PopupMenuItem(
                 value: 'clear',
@@ -680,6 +825,55 @@ class _DictionaryManagementScreenState extends State<DictionaryManagementScreen>
                 ],
               ),
             ),
+          
+          // 单词统计信息
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            child: Row(
+              children: [
+                Consumer<DictionaryService>(
+                  builder: (context, dictionaryService, child) {
+                    final totalWords = dictionaryService.allWords.length;
+                    final familiarWords = dictionaryService.familiarWords.length;
+                    final percentage = totalWords > 0 
+                        ? (familiarWords / totalWords * 100).toStringAsFixed(1) 
+                        : '0';
+                        
+                    return Text(
+                      '总单词: $totalWords  |  熟知单词: $familiarWords ($percentage%)',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    );
+                  },
+                ),
+                const Spacer(),
+                // 熟知过滤选项
+                DropdownButton<bool?>(
+                  value: _showFamiliarFilter,
+                  items: const [
+                    DropdownMenuItem(
+                      value: null,
+                      child: Text('全部单词'),
+                    ),
+                    DropdownMenuItem(
+                      value: true,
+                      child: Text('熟知单词'),
+                    ),
+                    DropdownMenuItem(
+                      value: false,
+                      child: Text('未熟知单词'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    setState(() {
+                      _showFamiliarFilter = value;
+                      _filterWords();
+                    });
+                  },
+                  hint: const Text('过滤'),
+                ),
+              ],
+            ),
+          ),
           
           // 选中单词信息
           if (_selectedWords.isNotEmpty)
@@ -790,6 +984,24 @@ class _DictionaryManagementScreenState extends State<DictionaryManagementScreen>
                                             ),
                                           ),
                                         ),
+                                      
+                                      // 熟知标签
+                                      if (word.isFamiliar)
+                                        Container(
+                                          margin: const EdgeInsets.only(left: 8),
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.blue.withOpacity(0.1),
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: const Text(
+                                            '熟知',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.blue,
+                                            ),
+                                          ),
+                                        ),
                                     ],
                                   ),
                                   
@@ -811,6 +1023,27 @@ class _DictionaryManagementScreenState extends State<DictionaryManagementScreen>
                               icon: const Icon(Icons.edit, size: 20),
                               onPressed: () => _editWord(word),
                               tooltip: '编辑单词',
+                            ),
+                            
+                            // 熟知切换按钮
+                            IconButton(
+                              icon: Icon(
+                                word.isFamiliar 
+                                  ? Icons.check_circle
+                                  : Icons.check_circle_outline,
+                                size: 20,
+                                color: word.isFamiliar ? Colors.blue : null,
+                              ),
+                              onPressed: () async {
+                                final dictionaryService = Provider.of<DictionaryService>(context, listen: false);
+                                if (word.isFamiliar) {
+                                  await dictionaryService.unmarkAsFamiliar(word.word);
+                                } else {
+                                  await dictionaryService.markAsFamiliar(word.word);
+                                }
+                                _filterWords();
+                              },
+                              tooltip: word.isFamiliar ? '取消标记为熟知' : '标记为熟知',
                             ),
                           ],
                         ),
