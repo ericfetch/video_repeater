@@ -46,6 +46,12 @@ class DictionaryService extends ChangeNotifier {
         debugPrint('Hive可能已经初始化: $e');
       }
       
+      // 注册适配器
+      if (!Hive.isAdapterRegistered(31)) {
+        debugPrint('注册DictionaryWordAdapter');
+        Hive.registerAdapter(DictionaryWordAdapter());
+      }
+      
       try {
         // 打开盒子
         debugPrint('尝试打开词典盒子: $_dictionaryBoxName');
@@ -195,34 +201,52 @@ class DictionaryService extends ChangeNotifier {
   // 从CSV文件导入词典
   Future<int> importDictionaryFromCsv(String filePath) async {
     try {
+      debugPrint('开始导入CSV文件: $filePath');
       final file = File(filePath);
+      
+      if (!await file.exists()) {
+        debugPrint('CSV文件不存在: $filePath');
+        return 0;
+      }
+      
+      debugPrint('CSV文件大小: ${await file.length()} 字节');
       
       // 尝试不同的编码格式读取文件
       String csvString;
       try {
         // 首先尝试UTF-8编码
+        debugPrint('尝试使用UTF-8编码读取CSV文件');
         csvString = await file.readAsString();
+        debugPrint('使用UTF-8编码成功读取CSV文件，内容长度: ${csvString.length}');
       } catch (e) {
+        debugPrint('UTF-8编码读取失败，尝试使用Latin1编码: $e');
         // 如果UTF-8失败，尝试使用Latin1编码（适用于大多数欧洲语言和英语）
         final bytes = await file.readAsBytes();
         csvString = String.fromCharCodes(bytes);
+        debugPrint('使用Latin1编码读取CSV文件，内容长度: ${csvString.length}');
       }
       
+      debugPrint('开始解析CSV数据');
       final List<List<dynamic>> csvTable = const CsvToListConverter().convert(csvString);
       
+      debugPrint('CSV解析完成，共 ${csvTable.length} 行');
+      
       if (csvTable.isEmpty) {
-        debugPrint('CSV文件为空');
+        debugPrint('CSV文件为空或格式错误');
         return 0;
       }
       
       // 检查CSV格式
       final headers = csvTable[0].map((h) => h.toString().trim().toLowerCase()).toList();
+      debugPrint('CSV表头: $headers');
+      
       final List<DictionaryWord> words = [];
       
       // 跳过标题行
       for (int i = 1; i < csvTable.length; i++) {
         final row = csvTable[i];
         if (row.isEmpty || row[0] == null || row[0].toString().trim().isEmpty) {
+          debugPrint('跳过第 $i 行: 空行或第一列为空');
           continue; // 跳过空行
         }
         
@@ -319,6 +343,10 @@ class DictionaryService extends ChangeNotifier {
               cefr: cefr,
               extraInfo: extraInfo.isNotEmpty ? extraInfo : null,
             ));
+            
+            if (i % 100 == 0 || i == csvTable.length - 1) {
+              debugPrint('已处理 $i/${csvTable.length - 1} 行');
+            }
           }
         } else {
           // 未知格式，尝试使用第一列作为单词
@@ -338,10 +366,14 @@ class DictionaryService extends ChangeNotifier {
         return 0;
       }
       
+      debugPrint('准备添加 ${words.length} 个单词到词典');
       await addWords(words);
+      debugPrint('成功导入 ${words.length} 个单词');
+      
       return words.length;
-    } catch (e) {
+    } catch (e, stackTrace) {
       debugPrint('导入CSV词典失败: $e');
+      debugPrint('错误堆栈: $stackTrace');
       return 0;
     }
   }
