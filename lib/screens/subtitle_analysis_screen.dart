@@ -121,12 +121,12 @@ class _SubtitleAnalysisScreenState extends State<SubtitleAnalysisScreen> {
           _tempNeedsLearning.add(word);
           _needsLearningWords++;
           
-          if (widget.dictionaryService.getWord(word) != null) {
-            _knownWords++;
-          } else if (vocabularyWordSet.contains(word.toLowerCase())) {
-            _vocabularyWords++;
-          } else {
-            _unknownWords++;
+        if (widget.dictionaryService.getWord(word) != null) {
+          _knownWords++;
+        } else if (vocabularyWordSet.contains(word.toLowerCase())) {
+          _vocabularyWords++;
+        } else {
+          _unknownWords++;
           }
         }
       });
@@ -369,8 +369,8 @@ class _SubtitleAnalysisScreenState extends State<SubtitleAnalysisScreen> {
               if (_isAnalyzed)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: Column(
-                    children: [
+                    child: Column(
+                      children: [
                       // 上部统计信息行
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -406,29 +406,29 @@ class _SubtitleAnalysisScreenState extends State<SubtitleAnalysisScreen> {
                                 const SizedBox(width: 8),
                                 _CompactStatItem(
                                   label: '词典',
-                                  count: _knownWords,
-                                  color: Colors.green,
-                                ),
+                                count: _knownWords,
+                                color: Colors.green,
+                              ),
                                 const SizedBox(width: 8),
                                 _CompactStatItem(
                                   label: '生词',
-                                  count: _vocabularyWords,
-                                  color: Colors.orange,
-                                ),
+                                count: _vocabularyWords,
+                                color: Colors.orange,
+                              ),
                                 const SizedBox(width: 8),
                                 _CompactStatItem(
                                   label: '未知',
-                                  count: _unknownWords,
-                                  color: Colors.red,
-                                ),
-                              ],
-                            ),
+                                count: _unknownWords,
+                                color: Colors.red,
+                              ),
                           ],
                         ),
-                      ),
+                      ],
+                    ),
+                  ),
                       
                       const SizedBox(height: 4),
-                      
+              
                       // 搜索和过滤控件行
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -436,34 +436,34 @@ class _SubtitleAnalysisScreenState extends State<SubtitleAnalysisScreen> {
                           color: Theme.of(context).cardColor,
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: Column(
-                          children: [
+                      child: Column(
+                        children: [
                             // 排序下拉框和过滤选项
-                            Row(
-                              children: [
+                          Row(
+                            children: [
                                 // 排序下拉框
-                                DropdownButton<SortMethod>(
-                                  value: _sortMethod,
-                                  items: [
-                                    const DropdownMenuItem(
-                                      value: SortMethod.frequency,
+                              DropdownButton<SortMethod>(
+                                value: _sortMethod,
+                                items: [
+                                  const DropdownMenuItem(
+                                    value: SortMethod.frequency,
                                       child: Text('按频率'),
-                                    ),
-                                    const DropdownMenuItem(
-                                      value: SortMethod.alphabetical,
+                                  ),
+                                  const DropdownMenuItem(
+                                    value: SortMethod.alphabetical,
                                       child: Text('按字母'),
-                                    ),
-                                  ],
-                                  onChanged: (value) {
-                                    if (value != null) {
-                                      setState(() {
-                                        _sortMethod = value;
-                                      });
-                                    }
-                                  },
-                                ),
+                                  ),
+                                ],
+                                onChanged: (value) {
+                                  if (value != null) {
+                                    setState(() {
+                                      _sortMethod = value;
+                                    });
+                                  }
+                                },
+                              ),
                                 const SizedBox(width: 16),
-                                // 过滤选项
+                              // 过滤选项
                                 Expanded(
                                   child: SingleChildScrollView(
                                     scrollDirection: Axis.horizontal,
@@ -495,48 +495,48 @@ class _SubtitleAnalysisScreenState extends State<SubtitleAnalysisScreen> {
                                         const SizedBox(width: 4),
                                         _CompactFilterChip(
                                           label: '词典',
-                                          selected: _showKnownWords,
+                                selected: _showKnownWords,
                                           color: Colors.green,
-                                          onSelected: (selected) {
-                                            setState(() {
-                                              _showKnownWords = selected;
-                                            });
-                                          },
+                                onSelected: (selected) {
+                                  setState(() {
+                                    _showKnownWords = selected;
+                                  });
+                                },
                                           icon: Icons.check_circle,
-                                        ),
+                              ),
                                         const SizedBox(width: 4),
                                         _CompactFilterChip(
                                           label: '生词',
-                                          selected: _showVocabularyWords,
+                                selected: _showVocabularyWords,
                                           color: Colors.orange,
-                                          onSelected: (selected) {
-                                            setState(() {
-                                              _showVocabularyWords = selected;
-                                            });
-                                          },
+                                onSelected: (selected) {
+                                  setState(() {
+                                    _showVocabularyWords = selected;
+                                  });
+                                },
                                           icon: Icons.book,
-                                        ),
+                              ),
                                         const SizedBox(width: 4),
                                         _CompactFilterChip(
                                           label: '未知',
-                                          selected: _showUnknownWords,
+                                selected: _showUnknownWords,
                                           color: Colors.red,
-                                          onSelected: (selected) {
-                                            setState(() {
-                                              _showUnknownWords = selected;
-                                            });
-                                          },
+                                onSelected: (selected) {
+                                  setState(() {
+                                    _showUnknownWords = selected;
+                                  });
+                                },
                                           icon: Icons.help_outline,
                                         ),
                                       ],
                                     ),
-                                  ),
                                 ),
-                              ],
-                            ),
-                          ],
-                        ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
+                    ),
                     ],
                   ),
                 ),
@@ -580,7 +580,7 @@ class _SubtitleAnalysisScreenState extends State<SubtitleAnalysisScreen> {
                                   ? const Icon(Icons.school, color: Colors.purple, size: 20)
                                   : isKnown
                                     ? const Icon(Icons.check_circle, color: Colors.green, size: 20)
-                                    : isInVocabulary
+                                : isInVocabulary
                                       ? const Icon(Icons.book, color: Colors.orange, size: 20)
                                       : const Icon(Icons.help_outline, color: Colors.red, size: 20),
                               trailing: Row(

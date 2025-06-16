@@ -25,13 +25,14 @@ class DictionaryWordAdapter extends TypeAdapter<DictionaryWord> {
       phonetic: fields[5] as String?,
       cefr: fields[6] as String?,
       extraInfo: (fields[7] as Map?)?.cast<String, dynamic>(),
+      isFamiliar: fields[8] as bool,
     );
   }
 
   @override
   void write(BinaryWriter writer, DictionaryWord obj) {
     writer
-      ..writeByte(8)
+      ..writeByte(9)
       ..writeByte(0)
       ..write(obj.word)
       ..writeByte(1)
@@ -47,7 +48,9 @@ class DictionaryWordAdapter extends TypeAdapter<DictionaryWord> {
       ..writeByte(6)
       ..write(obj.cefr)
       ..writeByte(7)
-      ..write(obj.extraInfo);
+      ..write(obj.extraInfo)
+      ..writeByte(8)
+      ..write(obj.isFamiliar);
   }
 
   @override
