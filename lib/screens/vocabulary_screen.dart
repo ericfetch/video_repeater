@@ -6,6 +6,8 @@ import '../models/vocabulary_model.dart';
 import '../services/dictionary_service.dart';
 import '../services/message_service.dart';
 import '../models/dictionary_word.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 
 class VocabularyScreen extends StatefulWidget {
   const VocabularyScreen({super.key});
@@ -17,6 +19,9 @@ class VocabularyScreen extends StatefulWidget {
 class _VocabularyScreenState extends State<VocabularyScreen> {
   bool _isSelectionMode = false;
   Set<String> _selectedWords = {};
+  TextEditingController _searchController = TextEditingController();
+  List<String> _tags = [];
+  String? _selectedTag;
   
   @override
   void initState() {
@@ -54,6 +59,7 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
   Future<void> _deleteSelectedWords() async {
     if (_selectedWords.isEmpty) return;
     
+    debugPrint('开始删除选中的单词，共 ${_selectedWords.length} 个');
     final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
     final allWords = vocabularyService.getAllWords();
     
@@ -76,20 +82,81 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
       ),
     ) ?? false;
     
-    if (!confirmed) return;
+    if (!confirmed) {
+      debugPrint('用户取消删除');
+      return;
+    }
     
-    // 删除选中的单词
+    debugPrint('用户确认删除');
+    
+    // 建立单词到视频的映射
+    final wordToVideoMap = <String, String>{};
     for (final word in allWords) {
       if (_selectedWords.contains(word.word)) {
-        await vocabularyService.removeWord(word.videoName, word.word);
+        wordToVideoMap[word.word] = word.videoName;
+        debugPrint('将删除单词: ${word.word}, 视频: ${word.videoName}');
       }
     }
     
-    // 清空选择并退出选择模式
-    setState(() {
-      _selectedWords.clear();
-      _isSelectionMode = false;
-    });
+    if (wordToVideoMap.isEmpty) {
+      debugPrint('没有找到要删除的单词');
+      setState(() {
+        _selectedWords.clear();
+        _isSelectionMode = false;
+      });
+      return;
+    }
+    
+    // 显示进度指示器
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('正在删除单词...'),
+          ],
+        ),
+      ),
+    );
+    
+    try {
+      // 删除选中的单词
+      for (final entry in wordToVideoMap.entries) {
+        final word = entry.key;
+        final videoName = entry.value;
+        debugPrint('删除单词: $word, 视频: $videoName');
+        await vocabularyService.removeWord(videoName, word);
+      }
+      
+      // 关闭进度指示器
+      if (mounted) Navigator.of(context).pop();
+      
+      // 清空选择并退出选择模式
+      setState(() {
+        _selectedWords.clear();
+        _isSelectionMode = false;
+      });
+      
+      // 显示成功消息
+      final messageService = Provider.of<MessageService>(context, listen: false);
+      messageService.showSuccess('已删除 ${wordToVideoMap.length} 个单词');
+      
+      debugPrint('删除完成');
+    } catch (e) {
+      // 关闭进度指示器
+      if (mounted) Navigator.of(context).pop();
+      
+      // 显示错误消息
+      final messageService = Provider.of<MessageService>(context, listen: false);
+      messageService.showError('删除单词时出错: $e');
+      
+      debugPrint('删除失败: $e');
+      debugPrintStack(stackTrace: StackTrace.current);
+    }
   }
   
   Future<void> _copySelectedWords() async {
@@ -204,10 +271,153 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
     );
   }
   
+  // 保存文件到本地
+  Future<void> _saveToFile(String content, String defaultFileName) async {
+    try {
+      // 获取应用文档目录
+      final directory = await getApplicationDocumentsDirectory();
+      final filePath = '${directory.path}/$defaultFileName';
+      
+      // 保存文件
+      final file = File(filePath);
+      await file.writeAsString(content);
+      
+      // 显示成功消息
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('文件已保存到: $filePath'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      debugPrint('保存文件失败: $e');
+      debugPrintStack(stackTrace: StackTrace.current);
+      
+      // 显示错误消息
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('保存文件失败: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+  
+  // 导出JSON备份
+  Future<void> _exportJsonBackup() async {
+    try {
+      final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+      final content = vocabularyService.exportVocabularyAsJSON();
+      await _saveToFile(content, 'vocabulary_backup.json');
+    } catch (e) {
+      debugPrint('导出JSON备份失败: $e');
+      debugPrintStack(stackTrace: StackTrace.current);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('导出JSON备份失败: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+  
+  // 从文件导入数据
+  Future<void> _importFromFile() async {
+    try {
+      // 获取应用文档目录
+      final directory = await getApplicationDocumentsDirectory();
+      final filePath = '${directory.path}/vocabulary_backup.json';
+      
+      // 检查文件是否存在
+      final file = File(filePath);
+      if (!await file.exists()) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('备份文件不存在，请先导出备份'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+      
+      // 显示进度指示器
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('正在导入数据...'),
+            ],
+          ),
+        ),
+      );
+      
+      try {
+        final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+        
+        // 读取文件内容
+        final content = await file.readAsString();
+        
+        // 导入数据
+        final results = await vocabularyService.importVocabularyFromJSON(content);
+        
+        // 关闭进度指示器
+        if (mounted) Navigator.of(context).pop();
+        
+        // 显示结果
+        if (results.containsKey('error')) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('导入失败: ${results['error']}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('成功导入 ${results['lists']} 个生词本，共 ${results['words']} 个单词'),
+              backgroundColor: Colors.green,
+            ),
+          );
+          // 刷新界面
+          setState(() {});
+        }
+      } catch (e) {
+        // 确保进度指示器被关闭
+        if (mounted) Navigator.of(context).pop();
+        
+        debugPrint('导入数据处理失败: $e');
+        debugPrintStack(stackTrace: StackTrace.current);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('导入数据处理失败: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('导入文件失败: $e');
+      debugPrintStack(stackTrace: StackTrace.current);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('导入文件失败: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+  
   @override
   Widget build(BuildContext context) {
-    final vocabularyService = Provider.of<VocabularyService>(context);
-    final dictionaryService = Provider.of<DictionaryService>(context);
+    // 获取服务但不监听变化
+    final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+    final dictionaryService = Provider.of<DictionaryService>(context, listen: false);
+    
+    // 获取单词列表（现在有缓存，不会频繁触发数据库访问）
     final allWords = vocabularyService.getAllWords();
     
     return Scaffold(
@@ -232,18 +442,30 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
               onPressed: _toggleSelectionMode,
             ),
           ] else ...[
-            // 正常模式下的菜单
+            // 导入按钮
+            IconButton(
+              icon: const Icon(Icons.upload_file),
+              tooltip: '导入备份',
+              onPressed: _importFromFile,
+            ),
+            // 导出按钮
+            IconButton(
+              icon: const Icon(Icons.download),
+              tooltip: '导出备份',
+              onPressed: _exportJsonBackup,
+            ),
+            // 其他操作菜单
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert),
               onSelected: (value) async {
                 if (value == 'export_txt') {
                   // 导出为文本
                   final content = vocabularyService.exportVocabularyAsText();
-                  // 保存文件逻辑
+                  _saveToFile(content, 'vocabulary.txt');
                 } else if (value == 'export_csv') {
                   // 导出为CSV
                   final content = vocabularyService.exportVocabularyAsCSV();
-                  // 保存文件逻辑
+                  _saveToFile(content, 'vocabulary.csv');
                 } else if (value == 'clear') {
                   // 清空生词本
                   final confirmed = await showDialog<bool>(
@@ -268,6 +490,50 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
                     await vocabularyService.clearVocabulary();
                     setState(() {});
                   }
+                } else if (value == 'repair') {
+                  // 修复数据库
+                  final messageService = Provider.of<MessageService>(context, listen: false);
+                  messageService.showInfo('正在检查数据库...');
+                  
+                  // 显示进度指示器
+                  showDialog(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (context) => const AlertDialog(
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(),
+                          SizedBox(height: 16),
+                          Text('正在检查和修复数据库...'),
+                        ],
+                      ),
+                    ),
+                  );
+                  
+                  try {
+                    final results = await vocabularyService.safeRepairVocabularyData();
+                    
+                    // 关闭进度指示器
+                    Navigator.of(context).pop();
+                    
+                    if (results['fixedLists']! > 0 || results['fixedWords']! > 0) {
+                      messageService.showSuccess(
+                        '数据库修复完成，修复了 ${results['fixedLists']} 个生词本和 ${results['fixedWords']} 个单词'
+                      );
+                    } else {
+                      messageService.showInfo('数据库检查完成，未发现问题');
+                    }
+                    
+                    setState(() {});
+                  } catch (e) {
+                    // 关闭进度指示器
+                    Navigator.of(context).pop();
+                    
+                    messageService.showError('修复数据库时出错: $e');
+                    debugPrint('修复数据库失败: $e');
+                    debugPrintStack(stackTrace: StackTrace.current);
+                  }
                 }
               },
               itemBuilder: (context) => [
@@ -283,6 +549,10 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
                   value: 'clear',
                   child: Text('清空生词本'),
                 ),
+                const PopupMenuItem<String>(
+                  value: 'repair',
+                  child: Text('修复数据库'),
+                ),
               ],
             ),
           ],
@@ -290,28 +560,86 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
       ),
       body: Column(
         children: [
-          // 功能区域
-          if (!_isSelectionMode)
+          // 词典搜索栏
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                labelText: '搜索单词',
+                hintText: '输入要查询的单词',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchController.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() {});
+                      },
+                    )
+                  : null,
+                border: const OutlineInputBorder(),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+          ),
+          
+          // 标签过滤器
+          if (_tags.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.all(8.0),
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    // 全部标签
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4.0),
+                      child: FilterChip(
+                        label: const Text('全部'),
+                        selected: _selectedTag == null,
+                        onSelected: (_) {
+                          setState(() {
+                            _selectedTag = null;
+                          });
+                        },
+                      ),
+                    ),
+                    
+                    // 视频标签
+                    for (final tag in _tags)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4.0),
+                        child: FilterChip(
+                          label: Text(tag),
+                          selected: _selectedTag == tag,
+                          onSelected: (_) {
+                            setState(() {
+                              _selectedTag = tag;
+                            });
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          
+          // 选择工具栏
+          if (_isSelectionMode && _selectedWords.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  ActionChip(
-                    avatar: const Icon(Icons.select_all, size: 18),
-                    label: const Text('选择模式'),
-                    onPressed: _toggleSelectionMode,
-                  ),
-                  const SizedBox(width: 12),
-                  ActionChip(
-                    avatar: const Icon(Icons.copy, size: 18),
-                    label: const Text('复制全部'),
+                  Text('已选择 ${_selectedWords.length} 个单词'),
+                  const Spacer(),
+                  TextButton(
                     onPressed: () {
-                      final words = allWords.map((w) => w.word).join('\n');
-                      Clipboard.setData(ClipboardData(text: words));
-                      final messageService = Provider.of<MessageService>(context, listen: false);
-                      messageService.showSuccess('已复制所有单词到剪贴板');
+                      setState(() {
+                        _selectedWords.clear();
+                      });
                     },
+                    child: const Text('取消选择'),
                   ),
                 ],
               ),
@@ -319,197 +647,186 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
           
           // 单词列表
           Expanded(
-            child: allWords.isEmpty
-                ? const Center(child: Text('生词本为空'))
-                : ListView.builder(
-                    itemCount: allWords.length,
-                    itemBuilder: (context, index) {
-                      final word = allWords[index];
-                      
-                      // 尝试从词典获取更多信息
-                      DictionaryWord? dictWord;
-                      bool isInDictionary = false;
-                      if (dictionaryService.isInitialized) {
-                        dictWord = dictionaryService.getWord(word.word);
-                        isInDictionary = dictWord != null;
-                      }
-                      
-                      return Card(
-                        margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-                        child: ListTile(
-                          leading: _isSelectionMode
-                              ? Checkbox(
-                                  value: _selectedWords.contains(word.word),
-                                  onChanged: (_) => _toggleWordSelection(word.word),
-                                )
-                              : isInDictionary
-                                  ? const Icon(Icons.star, color: Colors.amber)
-                                  : null,
-                          title: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  word.word,
-                                  style: const TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                              if (!_isSelectionMode) ...[
-                                IconButton(
-                                  icon: const Icon(Icons.copy, size: 18),
-                                  tooltip: '复制单词',
-                                  onPressed: () => _copyWord(word.word),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.edit, size: 18),
-                                  tooltip: '编辑单词',
-                                  onPressed: () => _showEditWordDialog(context, word),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.delete, size: 18),
-                                  tooltip: '删除单词',
-                                  onPressed: () async {
-                                    final confirmed = await showDialog<bool>(
-                                      context: context,
-                                      builder: (context) => AlertDialog(
-                                        title: const Text('确认删除'),
-                                        content: Text('确定要删除单词 "${word.word}" 吗？'),
-                                        actions: [
-                                          TextButton(
-                                            onPressed: () => Navigator.of(context).pop(false),
-                                            child: const Text('取消'),
-                                          ),
-                                          TextButton(
-                                            onPressed: () => Navigator.of(context).pop(true),
-                                            child: const Text('确定'),
-                                          ),
-                                        ],
-                                      ),
-                                    ) ?? false;
-                                    
-                                    if (confirmed) {
-                                      await vocabularyService.removeWord(word.videoName, word.word);
-                                      setState(() {});
-                                    }
-                                  },
-                                ),
-                              ],
-                            ],
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (dictWord != null && dictWord.definition != null)
-                                Text(
-                                  dictWord.definition!,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '来源: ${word.context}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
-                              Row(
-                                children: [
-                                  Text(
-                                    '视频: ${word.videoName}',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.grey[400],
-                                    ),
-                                  ),
-                                  const Spacer(),
-                                  Text(
-                                    '添加时间: ${word.addedTime.toString().split('.')[0]}',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.grey[400],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          onTap: _isSelectionMode
-                              ? () => _toggleWordSelection(word.word)
-                              : () {
-                                  // 显示单词详情
-                                  showDialog(
-                                    context: context,
-                                    builder: (context) => AlertDialog(
-                                      title: Row(
-                                        children: [
-                                          Expanded(child: Text(word.word)),
-                                          if (isInDictionary)
-                                            const Icon(Icons.star, color: Colors.amber),
-                                          IconButton(
-                                            icon: const Icon(Icons.copy),
-                                            tooltip: '复制单词',
-                                            onPressed: () {
-                                              _copyWord(word.word);
-                                              Navigator.pop(context);
-                                            },
-                                          ),
-                                          IconButton(
-                                            icon: const Icon(Icons.edit),
-                                            tooltip: '编辑单词',
-                                            onPressed: () {
-                                              Navigator.pop(context);
-                                              _showEditWordDialog(context, word);
-                                            },
-                                          ),
-                                        ],
-                                      ),
-                                      content: SingleChildScrollView(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            if (dictWord != null) ...[
-                                              if (dictWord.partOfSpeech != null)
-                                                Text('词性: ${dictWord.partOfSpeech}'),
-                                              if (dictWord.definition != null)
-                                                Text('释义: ${dictWord.definition}'),
-                                              if (dictWord.phonetic != null)
-                                                Text('音标: ${dictWord.phonetic}'),
-                                              if (dictWord.cefr != null)
-                                                Text('CEFR等级: ${dictWord.cefr}'),
-                                              const SizedBox(height: 8),
-                                            ],
-                                            Text('上下文: ${word.context}'),
-                                            Text('视频: ${word.videoName}'),
-                                            Text('添加时间: ${word.addedTime.toString().split('.')[0]}'),
-                                          ],
-                                        ),
-                                      ),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () => Navigator.of(context).pop(),
-                                          child: const Text('关闭'),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                },
-                        ),
-                      );
-                    },
-                  ),
+            child: _buildWordList(allWords),
           ),
         ],
       ),
-      floatingActionButton: _isSelectionMode && _selectedWords.isNotEmpty
-          ? FloatingActionButton(
-              onPressed: _deleteSelectedWords,
-              tooltip: '删除选中',
-              child: const Icon(Icons.delete),
-            )
-          : null,
+      floatingActionButton: _isSelectionMode
+        ? FloatingActionButton(
+            onPressed: _selectedWords.isNotEmpty ? _deleteSelectedWords : null,
+            backgroundColor: _selectedWords.isNotEmpty ? null : Colors.grey,
+            child: const Icon(Icons.delete),
+          )
+        : null,
+    );
+  }
+
+  Widget _buildWordList(List<VocabularyWord> words) {
+    if (words.isEmpty) {
+      return const Center(child: Text('生词本为空'));
+    }
+
+    // 获取服务但不监听变化
+    final dictionaryService = Provider.of<DictionaryService>(context, listen: false);
+    final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+
+    return ListView.builder(
+      itemCount: words.length,
+      itemBuilder: (context, index) {
+        final word = words[index];
+        
+        // 尝试从词典获取更多信息
+        final dictionaryWord = dictionaryService.getWord(word.word);
+        final isSelected = _selectedWords.contains(word.word);
+        final isInDictionary = dictionaryWord != null;
+        
+        return Card(
+          margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+          child: ListTile(
+            title: Text(
+              word.word,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (word.context.isNotEmpty)
+                  Text(
+                    '上下文: ${word.context}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                Text('来源: ${word.videoName}'),
+                if (dictionaryWord != null) ...[
+                  if (dictionaryWord.definition != null && dictionaryWord.definition!.isNotEmpty)
+                    Text(
+                      '释义: ${dictionaryWord.definition}',
+                      style: const TextStyle(color: Colors.blue),
+                    ),
+                  if (dictionaryWord.phonetic != null && dictionaryWord.phonetic!.isNotEmpty)
+                    Text(
+                      '音标: [${dictionaryWord.phonetic}]',
+                      style: const TextStyle(fontStyle: FontStyle.italic),
+                    ),
+                ],
+              ],
+            ),
+            leading: _isSelectionMode
+                ? Checkbox(
+                    value: isSelected,
+                    onChanged: (value) {
+                      setState(() {
+                        if (value == true) {
+                          _selectedWords.add(word.word);
+                        } else {
+                          _selectedWords.remove(word.word);
+                        }
+                      });
+                    },
+                  )
+                : isInDictionary
+                    ? const Icon(Icons.star, color: Colors.amber)
+                    : null,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.edit),
+                  onPressed: () => _showEditWordDialog(context, word),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete),
+                  onPressed: () async {
+                    final confirmed = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('确认删除'),
+                        content: Text('确定要删除单词 "${word.word}" 吗？'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(false),
+                            child: const Text('取消'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(true),
+                            child: const Text('确定'),
+                          ),
+                        ],
+                      ),
+                    ) ?? false;
+                    
+                    if (confirmed) {
+                      await vocabularyService.removeWord(word.videoName, word.word);
+                      setState(() {});
+                    }
+                  },
+                ),
+              ],
+            ),
+            onTap: _isSelectionMode
+                ? () {
+                    setState(() {
+                      if (isSelected) {
+                        _selectedWords.remove(word.word);
+                      } else {
+                        _selectedWords.add(word.word);
+                      }
+                    });
+                  }
+                : () {
+                    // 显示单词详情
+                    showDialog(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: Row(
+                          children: [
+                            Expanded(child: Text(word.word)),
+                            if (isInDictionary)
+                              const Icon(Icons.star, color: Colors.amber),
+                          ],
+                        ),
+                        content: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (dictionaryWord != null) ...[
+                                if (dictionaryWord.partOfSpeech != null)
+                                  Text('词性: ${dictionaryWord.partOfSpeech}'),
+                                if (dictionaryWord.definition != null)
+                                  Text('释义: ${dictionaryWord.definition}'),
+                                if (dictionaryWord.phonetic != null)
+                                  Text('音标: ${dictionaryWord.phonetic}'),
+                                if (dictionaryWord.cefr != null)
+                                  Text('CEFR等级: ${dictionaryWord.cefr}'),
+                                const SizedBox(height: 8),
+                              ],
+                              Text('上下文: ${word.context}'),
+                              Text('视频: ${word.videoName}'),
+                              Text('添加时间: ${word.addedTime.toString().split('.')[0]}'),
+                            ],
+                          ),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: const Text('关闭'),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+            onLongPress: () {
+              if (!_isSelectionMode) {
+                setState(() {
+                  _isSelectionMode = true;
+                  _selectedWords.add(word.word);
+                });
+              }
+            },
+          ),
+        );
+      },
     );
   }
 } 

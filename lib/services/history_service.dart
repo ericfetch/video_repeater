@@ -343,23 +343,40 @@ class HistoryService extends ChangeNotifier {
     if (!_isInitialized) await initialize();
     
     try {
+      debugPrint('开始清空历史记录...');
+      
       // 保留最后播放状态
       final lastState = _historyBox.get(_lastPlayStateKey);
+      debugPrint('保存最后播放状态: ${lastState?.videoName ?? "无"}');
       
-      // 清空Hive
-      await _historyBox.clear();
+      // 获取所有键，除了最后播放状态的键
+      final keysToDelete = _historyBox.keys
+          .where((key) => key != _lastPlayStateKey)
+          .toList();
+      
+      debugPrint('需要删除 ${keysToDelete.length} 条历史记录');
+      
+      // 逐个删除历史记录，而不是使用clear()
+      for (final key in keysToDelete) {
+        await _historyBox.delete(key);
+      }
       
       // 恢复最后播放状态
       if (lastState != null) {
         await _historyBox.put(_lastPlayStateKey, lastState);
+        debugPrint('已恢复最后播放状态');
       }
       
       // 清空内存列表
       _history.clear();
+      debugPrint('内存历史记录列表已清空');
       
       notifyListeners();
+      debugPrint('历史记录清空完成');
     } catch (e) {
       debugPrint('清空历史记录失败: $e');
+      debugPrintStack(stackTrace: StackTrace.current);
+      throw Exception('清空历史记录失败: $e');
     }
   }
   

@@ -63,20 +63,6 @@ class DictionaryService extends ChangeNotifier {
         debugPrint('生词本盒子打开成功，包含${_vocabularyBox.length}条记录');
       } catch (e) {
         debugPrint('打开盒子失败: $e');
-        
-        // 如果打开失败，尝试删除并重新创建
-        try {
-          debugPrint('尝试删除并重新创建盒子');
-          await Hive.deleteBoxFromDisk(_dictionaryBoxName);
-          await Hive.deleteBoxFromDisk(_vocabularyBoxName);
-          
-          _dictionaryBox = await Hive.openBox<DictionaryWord>(_dictionaryBoxName);
-          _vocabularyBox = await Hive.openBox<DictionaryWord>(_vocabularyBoxName);
-          debugPrint('盒子重新创建成功');
-        } catch (e) {
-          debugPrint('重新创建盒子失败: $e');
-          throw Exception('无法创建词典数据库: $e');
-        }
       }
       
       _isInitialized = true;
@@ -439,23 +425,59 @@ class DictionaryService extends ChangeNotifier {
   
   // 清空词典
   Future<void> clearDictionary() async {
-    await _dictionaryBox.clear();
-    notifyListeners();
+    try {
+      debugPrint('开始清空词典...');
+      
+      // 获取所有单词
+      final allKeys = _dictionaryBox.keys.toList();
+      final totalCount = allKeys.length;
+      debugPrint('词典中共有 $totalCount 个单词');
+      
+      // 批量删除单词
+      int batchSize = 100;
+      for (int i = 0; i < allKeys.length; i += batchSize) {
+        final end = (i + batchSize < allKeys.length) ? i + batchSize : allKeys.length;
+        final batch = allKeys.sublist(i, end);
+        
+        for (final key in batch) {
+          await _dictionaryBox.delete(key);
+        }
+        
+        debugPrint('已删除 ${end} / $totalCount 个单词');
+      }
+      
+      debugPrint('词典已清空');
+      allWords.clear();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('清空词典失败: $e');
+      debugPrintStack(stackTrace: StackTrace.current);
+      throw Exception('清空词典失败: $e');
+    }
   }
   
   // 清空生词本
   Future<void> clearVocabulary() async {
-    await _vocabularyBox.clear();
-    
-    // 更新词典中所有单词的isVocabulary状态
-    for (var word in allWords) {
-      if (word.isVocabulary) {
+    try {
+      debugPrint('开始清空生词本标记...');
+      
+      // 获取所有标记为生词的单词
+      final vocabWords = allWords.where((word) => word.isVocabulary).toList();
+      debugPrint('共有 ${vocabWords.length} 个单词标记为生词');
+      
+      // 更新词典中所有单词的isVocabulary状态
+      for (var word in vocabWords) {
         word.isVocabulary = false;
         await _dictionaryBox.put(word.word.toLowerCase(), word);
       }
+      
+      debugPrint('生词本标记已清空');
+      notifyListeners();
+    } catch (e) {
+      debugPrint('清空生词本标记失败: $e');
+      debugPrintStack(stackTrace: StackTrace.current);
+      throw Exception('清空生词本标记失败: $e');
     }
-    
-    notifyListeners();
   }
   
   // 通过API批量查询单词信息

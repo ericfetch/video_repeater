@@ -27,6 +27,20 @@ class _VocabularyListWidgetState extends State<VocabularyListWidget> {
   String? _currentLetter;
   // 是否显示删除确认对话框
   bool _showDeleteConfirmation = false;
+  // 缓存单词列表，避免频繁重建
+  List<VocabularyWord> _allWords = [];
+  
+  @override
+  void initState() {
+    super.initState();
+    _loadWords();
+  }
+  
+  // 在初始化时加载单词列表
+  void _loadWords() {
+    final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+    _allWords = vocabularyService.getAllWords(isActive: true);
+  }
   
   @override
   void dispose() {
@@ -36,186 +50,179 @@ class _VocabularyListWidgetState extends State<VocabularyListWidget> {
   
   @override
   Widget build(BuildContext context) {
-    return Consumer<VocabularyService>(
-      builder: (context, vocabularyService, child) {
-        // 获取所有单词
-        final allWords = vocabularyService.getAllWords();
-        
-        // 根据搜索关键词筛选单词
-        final filteredWords = _filterWords(allWords);
-        
-        // 如果没有单词，显示空状态
-        if (filteredWords.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+    // 根据搜索关键词筛选单词
+    final filteredWords = _filterWords(_allWords);
+    
+    // 如果没有单词，显示空状态
+    if (filteredWords.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.book, size: 48, color: Colors.grey),
+            const SizedBox(height: 16),
+            Text(
+              _searchController.text.isEmpty
+                ? '生词本为空'
+                : '没有找到匹配的单词',
+              style: const TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            if (_searchController.text.isNotEmpty)
+              ElevatedButton(
+                onPressed: () {
+                  _searchController.clear();
+                  setState(() {});
+                },
+                child: const Text('清除搜索'),
+              ),
+          ],
+        ),
+      );
+    }
+    
+    return Column(
+      children: [
+        if (widget.showControls) ...[
+          // 搜索框
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                labelText: '搜索单词',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchController.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() {});
+                      },
+                    )
+                  : null,
+                border: const OutlineInputBorder(),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+          ),
+          
+          // 字母筛选器
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
               children: [
-                const Icon(Icons.book, size: 48, color: Colors.grey),
-                const SizedBox(height: 16),
-                Text(
-                  _searchController.text.isEmpty
-                    ? '生词本为空'
-                    : '没有找到匹配的单词',
-                  style: const TextStyle(color: Colors.grey),
-                ),
-                const SizedBox(height: 16),
-                if (_searchController.text.isNotEmpty)
-                  ElevatedButton(
-                    onPressed: () {
-                      _searchController.clear();
-                      setState(() {});
+                // 全部按钮
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                  child: FilterChip(
+                    label: const Text('全部'),
+                    selected: _currentLetter == null,
+                    onSelected: (_) {
+                      setState(() {
+                        _currentLetter = null;
+                      });
                     },
-                    child: const Text('清除搜索'),
+                  ),
+                ),
+                
+                // 字母按钮
+                for (int i = 0; i < 26; i++)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2.0),
+                    child: FilterChip(
+                      label: Text(String.fromCharCode(65 + i)),
+                      selected: _currentLetter == String.fromCharCode(97 + i),
+                      onSelected: (_) {
+                        setState(() {
+                          _currentLetter = String.fromCharCode(97 + i);
+                        });
+                      },
+                    ),
                   ),
               ],
             ),
-          );
-        }
-        
-        return Column(
-          children: [
-            if (widget.showControls) ...[
-              // 搜索框
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: TextField(
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    labelText: '搜索单词',
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: _searchController.text.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.clear),
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() {});
-                          },
-                        )
-                      : null,
-                    border: const OutlineInputBorder(),
+          ),
+          
+          // 操作按钮
+          if (_selectedWords.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              child: Row(
+                children: [
+                  Text('已选择 ${_selectedWords.length} 个单词'),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _selectedWords.clear();
+                      });
+                    },
+                    child: const Text('取消选择'),
                   ),
-                  onChanged: (_) => setState(() {}),
-                ),
-              ),
-              
-              // 字母筛选器
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    // 全部按钮
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                      child: FilterChip(
-                        label: const Text('全部'),
-                        selected: _currentLetter == null,
-                        onSelected: (_) {
-                          setState(() {
-                            _currentLetter = null;
-                          });
-                        },
-                      ),
-                    ),
-                    
-                    // 字母按钮
-                    for (int i = 0; i < 26; i++)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 2.0),
-                        child: FilterChip(
-                          label: Text(String.fromCharCode(65 + i)),
-                          selected: _currentLetter == String.fromCharCode(97 + i),
-                          onSelected: (_) {
-                            setState(() {
-                              _currentLetter = String.fromCharCode(97 + i);
-                            });
-                          },
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              
-              // 操作按钮
-              if (_selectedWords.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                  child: Row(
-                    children: [
-                      Text('已选择 ${_selectedWords.length} 个单词'),
-                      const Spacer(),
-                      TextButton(
-                        onPressed: () {
-                          setState(() {
-                            _selectedWords.clear();
-                          });
-                        },
-                        child: const Text('取消选择'),
-                      ),
-                      TextButton(
-                        onPressed: () {
-                          setState(() {
-                            _showDeleteConfirmation = true;
-                          });
-                        },
-                        child: const Text('删除选中'),
-                      ),
-                    ],
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _showDeleteConfirmation = true;
+                      });
+                    },
+                    child: const Text('删除选中'),
                   ),
-                ),
-              
-              const Divider(),
-            ],
-            
-            // 单词列表
-            Expanded(
-              child: ListView.builder(
-                itemCount: filteredWords.length,
-                itemBuilder: (context, index) {
-                  final word = filteredWords[index];
-                  final isSelected = _selectedWords.contains(word.word);
-                  
-                  return ListTile(
-                    title: _buildWordDisplay(word.word, context),
-                    subtitle: word.context.isNotEmpty ? Text(word.context) : null,
-                    trailing: widget.showControls
-                      ? Checkbox(
-                          value: isSelected,
-                          onChanged: (value) {
-                            setState(() {
-                              if (value == true) {
-                                _selectedWords.add(word.word);
-                              } else {
-                                _selectedWords.remove(word.word);
-                              }
-                            });
-                          },
-                        )
-                      : null,
-                    onTap: widget.onWordSelected != null
-                      ? () => widget.onWordSelected!(word.word)
-                      : null,
-                    onLongPress: widget.showControls
-                      ? () {
-                          setState(() {
-                            if (isSelected) {
-                              _selectedWords.remove(word.word);
-                            } else {
-                              _selectedWords.add(word.word);
-                            }
-                          });
-                        }
-                      : null,
-                  );
-                },
+                ],
               ),
             ),
-            
-            // 删除确认对话框
-            if (_showDeleteConfirmation)
-              _buildDeleteConfirmationDialog(vocabularyService),
-          ],
-        );
-      },
+          
+          const Divider(),
+        ],
+        
+        // 单词列表
+        Expanded(
+          child: ListView.builder(
+            itemCount: filteredWords.length,
+            itemBuilder: (context, index) {
+              final word = filteredWords[index];
+              final isSelected = _selectedWords.contains(word.word);
+              
+              return ListTile(
+                title: _buildWordDisplay(word.word, context),
+                subtitle: word.context.isNotEmpty ? Text(word.context) : null,
+                trailing: widget.showControls
+                  ? Checkbox(
+                      value: isSelected,
+                      onChanged: (value) {
+                        setState(() {
+                          if (value == true) {
+                            _selectedWords.add(word.word);
+                          } else {
+                            _selectedWords.remove(word.word);
+                          }
+                        });
+                      },
+                    )
+                  : null,
+                onTap: widget.onWordSelected != null
+                  ? () => widget.onWordSelected!(word.word)
+                  : null,
+                onLongPress: widget.showControls
+                  ? () {
+                      setState(() {
+                        if (isSelected) {
+                          _selectedWords.remove(word.word);
+                        } else {
+                          _selectedWords.add(word.word);
+                        }
+                      });
+                    }
+                  : null,
+              );
+            },
+          ),
+        ),
+        
+        // 删除确认对话框
+        if (_showDeleteConfirmation)
+          _buildDeleteConfirmationDialog(),
+      ],
     );
   }
   
@@ -246,7 +253,9 @@ class _VocabularyListWidgetState extends State<VocabularyListWidget> {
   }
   
   // 构建删除确认对话框
-  Widget _buildDeleteConfirmationDialog(VocabularyService vocabularyService) {
+  Widget _buildDeleteConfirmationDialog() {
+    final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+    
     return AlertDialog(
       title: const Text('确认删除'),
       content: Text('确定要删除选中的 ${_selectedWords.length} 个单词吗？'),
@@ -260,20 +269,39 @@ class _VocabularyListWidgetState extends State<VocabularyListWidget> {
           child: const Text('取消'),
         ),
         TextButton(
-          onPressed: () {
-            // 删除选中的单词
-            for (final videoName in vocabularyService.vocabularyLists.keys) {
-              for (final word in _selectedWords) {
-                vocabularyService.removeWord(videoName, word);
+          onPressed: () async {
+            debugPrint('开始删除选中的单词，共 ${_selectedWords.length} 个');
+            
+            // 获取所有单词及其所属的视频
+            final wordToVideoMap = <String, String>{};
+            
+            // 建立单词到视频的映射
+            for (final word in _allWords) {
+              if (_selectedWords.contains(word.word)) {
+                wordToVideoMap[word.word] = word.videoName;
               }
             }
             
+            // 关闭对话框
             setState(() {
-              _selectedWords.clear();
               _showDeleteConfirmation = false;
             });
+            
+            // 删除单词
+            for (final entry in wordToVideoMap.entries) {
+              final word = entry.key;
+              final videoName = entry.value;
+              debugPrint('尝试从生词本"$videoName"中删除单词: $word');
+              await vocabularyService.removeWord(videoName, word);
+            }
+            
+            // 重新加载单词列表
+            setState(() {
+              _selectedWords.clear();
+              _allWords = vocabularyService.getAllWords(isActive: true);
+            });
           },
-          child: const Text('删除'),
+          child: const Text('确定'),
         ),
       ],
     );
@@ -281,26 +309,12 @@ class _VocabularyListWidgetState extends State<VocabularyListWidget> {
   
   // 构建单词显示
   Widget _buildWordDisplay(String word, BuildContext context) {
-    // 获取主题亮暗模式
+    final dictionaryService = Provider.of<DictionaryService>(context, listen: false);
+    final dictWord = dictionaryService.getWord(word);
+    final isInDictionary = dictWord != null;
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     
-    // 检查是否有词典服务
-    final dictionaryService = Provider.of<DictionaryService>(context, listen: false);
-    
-    // 检查词典是否已初始化
-    if (!dictionaryService.isInitialized) {
-      return SelectableText(
-        word,
-        style: const TextStyle(fontWeight: FontWeight.bold),
-      );
-    }
-    
-    // 查询词典
-    final dictWord = dictionaryService.getWord(word);
-    final isInDictionary = dictionaryService.containsWord(word);
-    
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         // 单词本身
         SelectableText(
@@ -337,25 +351,34 @@ class _VocabularyListWidgetState extends State<VocabularyListWidget> {
               child: Text(
                 dictWord.partOfSpeech!,
                 style: TextStyle(
-                  fontSize: 10,
+                  fontSize: 12,
                   color: isDarkMode ? Colors.white70 : Colors.black87,
                 ),
               ),
             ),
           
-          // 释义（如果有）
-          if (dictWord.definition != null && dictWord.definition!.isNotEmpty)
-            Expanded(
-              child: Text(
-                dictWord.definition!,
-                style: TextStyle(
-                  color: isDarkMode ? Colors.white70 : Colors.black87,
-                ),
-                overflow: TextOverflow.ellipsis,
+          // 简短释义
+          Expanded(
+            child: Text(
+              dictWord.definition ?? '',
+              style: TextStyle(
+                color: isDarkMode ? Colors.blue[200] : Colors.blue[800],
+                fontSize: 12,
               ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
+          ),
         ],
       ],
     );
+  }
+  
+  // 刷新单词列表
+  void refreshWordList() {
+    final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+    setState(() {
+      _allWords = vocabularyService.getAllWords(isActive: true);
+    });
   }
 } 

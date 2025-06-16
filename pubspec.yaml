@@ -41,7 +41,7 @@ dependencies:
   media_kit_libs_windows_video: ^1.0.9           # Windows平台支持
   
   # 文件选择和路径管理
-  file_picker: ^6.1.1
+  file_picker: ^10.2.0
   path_provider: ^2.1.5
   path: ^1.8.3
   
