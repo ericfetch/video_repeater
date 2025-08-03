@@ -1,18 +1,36 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'config_service.dart';
 
 class BailianTranslationService {
   static const String _baseUrl = 'https://dashscope.aliyuncs.com/api/v1/apps';
-  static const String _apiKey = 'sk-4f7e3ee31876447482efe8a092d5c2b0';
-  static const String _appId = '9676f5bed4b04cccb3ef288a072b7e4d';
+  
+  final ConfigService _configService;
+  
+  // 构造函数
+  BailianTranslationService({required ConfigService configService})
+      : _configService = configService;
   
   // 翻译文本
   Future<String> translateText(String text, {String targetLanguage = 'zh'}) async {
     try {
-      final url = Uri.parse('$_baseUrl/$_appId/completion');
+      // 从配置服务获取API密钥和应用ID
+      final apiKey = _configService.bailianApiKey;
+      final appId = _configService.bailianAppId;
+      
+      // 检查配置是否完整
+      if (apiKey == null || apiKey.isEmpty) {
+        return '百炼AI API密钥未配置，请在设置中配置';
+      }
+      
+      if (appId == null || appId.isEmpty) {
+        return '百炼AI应用ID未配置，请在设置中配置';
+      }
+      
+      final url = Uri.parse('$_baseUrl/$appId/completion');
       
       final headers = {
-        'Authorization': 'Bearer $_apiKey',
+        'Authorization': 'Bearer $apiKey',
         'Content-Type': 'application/json',
         'X-DashScope-SSE': 'disable',
       };

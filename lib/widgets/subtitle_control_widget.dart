@@ -37,9 +37,6 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
   // 音量增强系数
   double _volumeBoostFactor = 2.0;
   
-  // 翻译服务
-  final BailianTranslationService _translationService = BailianTranslationService();
-  
   // 翻译相关状态
   bool _isTranslating = false;
   String? _translatedText;
@@ -207,7 +204,7 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
     });
     
     try {
-      final translation = await _translationService.translateText(subtitleText);
+      final translation = await Provider.of<BailianTranslationService>(context, listen: false).translateText(subtitleText);
       
       setState(() {
         _translatedText = translation;

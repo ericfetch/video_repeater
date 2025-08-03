@@ -40,6 +40,8 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
   final _youtubeDownloadPathController = TextEditingController();
   final _googleTranslateApiKeyController = TextEditingController();
   final _googleProjectIdController = TextEditingController();
+  final _bailianApiKeyController = TextEditingController();
+  final _bailianAppIdController = TextEditingController();
   
   // 设置值
   bool _isDarkMode = false;
@@ -88,6 +90,8 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
     _youtubeDownloadPathController.text = configService.youtubeDownloadPath;
     _googleTranslateApiKeyController.text = configService.googleTranslateApiKey ?? '';
     _googleProjectIdController.text = configService.googleProjectId ?? '';
+    _bailianApiKeyController.text = configService.bailianApiKey ?? '';
+    _bailianAppIdController.text = configService.bailianAppId ?? '';
     
     // 更新设置值
     setState(() {
@@ -109,6 +113,8 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
     _youtubeDownloadPathController.dispose();
     _googleTranslateApiKeyController.dispose();
     _googleProjectIdController.dispose();
+    _bailianApiKeyController.dispose();
+    _bailianAppIdController.dispose();
     
     // 恢复视频播放状态
     if (widget.wasPlaying) {
@@ -169,6 +175,10 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
     configService.updateGoogleTranslateApiKey(_googleTranslateApiKeyController.text);
     configService.updateGoogleProjectId(_googleProjectIdController.text);
     configService.updateTranslateTargetLanguage(_translateTargetLanguage);
+    
+    // 保存百炼AI翻译设置
+    configService.updateBailianApiKey(_bailianApiKeyController.text);
+    configService.updateBailianAppId(_bailianAppIdController.text);
     
     // 保存其他设置
     configService.updateSubtitleFontWeight(_isBoldFont);
@@ -599,6 +609,68 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
                       const SizedBox(height: 4),
                       const Text(
                         '翻译结果的目标语言',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              
+              const SizedBox(height: 24),
+              
+              // 百炼AI翻译设置
+              const Text(
+                '百炼AI翻译设置',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const Divider(),
+              
+              // 百炼AI API密钥
+              StatefulBuilder(
+                builder: (context, setState) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('百炼AI API密钥'),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _bailianApiKeyController,
+                        decoration: const InputDecoration(
+                          hintText: '例如: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+                          border: OutlineInputBorder(),
+                        ),
+                        obscureText: true, // 隐藏敏感信息
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        '阿里云百炼AI的API密钥',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              
+              // 百炼AI应用ID
+              StatefulBuilder(
+                builder: (context, setState) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('百炼AI应用ID'),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _bailianAppIdController,
+                        decoration: const InputDecoration(
+                          hintText: '例如: 9676f5bed4b04cccb3ef288a072b7e4d',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        '阿里云百炼AI的应用ID',
                         style: TextStyle(fontSize: 12, color: Colors.grey),
                       ),
                     ],

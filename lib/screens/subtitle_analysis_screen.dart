@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import 'dart:async';
 import 'dart:collection';
 import 'dart:math' as math;
@@ -8,6 +9,7 @@ import 'package:audioplayers/audioplayers.dart';
 import '../services/video_service.dart';
 import '../services/vocabulary_service.dart';
 import '../services/dictionary_service.dart';
+import '../services/subtitle_analysis_service.dart';
 import '../services/bailian_translation_service.dart';
 import '../models/subtitle_model.dart';
 import '../models/dictionary_word.dart';
@@ -61,9 +63,6 @@ class _SubtitleAnalysisScreenState extends State<SubtitleAnalysisScreen> {
   // 添加变量来存储字幕中的所有单词
   Set<String> _subtitleWords = {};
   
-  // 翻译服务
-  final BailianTranslationService _translationService = BailianTranslationService();
-  
   // 翻译相关状态
   Map<String, String> _translations = {}; // 存储翻译结果
   Set<String> _translatingWords = {}; // 正在翻译的单词
@@ -73,10 +72,123 @@ class _SubtitleAnalysisScreenState extends State<SubtitleAnalysisScreen> {
   void initState() {
     super.initState();
     _videoTitle = widget.videoService.videoTitle;
-    _analyzeSubtitles();
+    _loadOrAnalyzeSubtitles();
   }
   
-  // 分析字幕中的单词
+  // 加载或分析字幕
+  Future<void> _loadOrAnalyzeSubtitles() async {
+    // 获取字幕分析服务
+    final analysisService = Provider.of<SubtitleAnalysisService>(context, listen: false);
+    
+    final videoPath = widget.videoService.currentVideoPath;
+    final subtitlePath = widget.videoService.currentSubtitlePath;
+    
+    if (videoPath == null) {
+      setState(() {
+        _isAnalyzing = false;
+        _isAnalyzed = false;
+      });
+      return;
+    }
+    
+    // 检查是否有预分析的结果
+    final cachedResult = analysisService.getAnalysisResult(videoPath, subtitlePath);
+    
+    if (cachedResult != null) {
+      // 使用缓存的分析结果
+      _loadFromCachedResult(cachedResult);
+    } else if (analysisService.isAnalyzing(videoPath, subtitlePath)) {
+      // 正在分析中，显示加载状态并等待完成
+      setState(() {
+        _isAnalyzing = true;
+        _isAnalyzed = false;
+      });
+      _waitForAnalysisCompletion(analysisService, videoPath, subtitlePath);
+    } else {
+      // 没有缓存且没有在分析，可能是分析服务还没来得及处理，手动触发分析
+      setState(() {
+        _isAnalyzing = true;
+        _isAnalyzed = false;
+      });
+      await _manuallyTriggerAnalysis(analysisService, videoPath, subtitlePath);
+    }
+  }
+  
+  // 从缓存结果加载数据
+  void _loadFromCachedResult(SubtitleAnalysisResult result) {
+    setState(() {
+      _wordFrequency = result.wordFrequency;
+      _wordToSubtitle = result.wordToSubtitle;
+      _wordToSubtitleEntry = result.wordToSubtitleEntry;
+      _subtitleWords = result.subtitleWords;
+      _lemmaToOriginalWords = result.lemmaToOriginalWords;
+      _totalWords = result.totalWords;
+      _uniqueWords = result.uniqueWords;
+      _knownWords = result.knownWords;
+      _vocabularyWords = result.vocabularyWords;
+      _unknownWords = result.unknownWords;
+      _familiarWords = result.familiarWords;
+      _needsLearningWords = result.needsLearningWords;
+      _originalSortedWords = result.originalSortedWords;
+      _isAnalyzing = false;
+      _isAnalyzed = true;
+    });
+    debugPrint('字幕分析: 从缓存加载分析结果 (${result.analysisTime})');
+  }
+  
+  // 等待分析完成
+  void _waitForAnalysisCompletion(SubtitleAnalysisService analysisService, String videoPath, String? subtitlePath) {
+    // 监听分析服务的状态变化
+    void listener() {
+      if (!analysisService.isAnalyzing(videoPath, subtitlePath)) {
+        // 分析完成，移除监听器
+        analysisService.removeListener(listener);
+        
+        // 获取结果
+        final result = analysisService.getAnalysisResult(videoPath, subtitlePath);
+        if (result != null && mounted) {
+          _loadFromCachedResult(result);
+        }
+      }
+    }
+    
+    analysisService.addListener(listener);
+  }
+  
+  // 手动触发分析
+  Future<void> _manuallyTriggerAnalysis(SubtitleAnalysisService analysisService, String videoPath, String? subtitlePath) async {
+    final subtitles = widget.videoService.subtitleData?.entries;
+    if (subtitles == null || subtitles.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('当前视频没有字幕，无法进行分析'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        setState(() {
+          _isAnalyzing = false;
+        });
+      }
+      return;
+    }
+    
+    await analysisService.analyzeSubtitlesSilently(
+      videoPath: videoPath,
+      subtitlePath: subtitlePath,
+      videoTitle: widget.videoService.videoTitle,
+      subtitles: subtitles,
+    );
+    
+    // 获取分析结果
+    final result = analysisService.getAnalysisResult(videoPath, subtitlePath);
+    if (result != null && mounted) {
+      _loadFromCachedResult(result);
+    }
+  }
+  
+  // 分析字幕中的单词 - 已废弃，现在使用字幕分析服务
+  /*
   Future<void> _analyzeSubtitles() async {
     setState(() {
       _isAnalyzing = true;
@@ -213,6 +325,7 @@ class _SubtitleAnalysisScreenState extends State<SubtitleAnalysisScreen> {
       });
     }
   }
+  */
   
   // 获取排序后的单词列表（为了性能，只显示非熟知单词）
   List<MapEntry<String, int>> _getSortedFilteredWords() {
@@ -437,7 +550,7 @@ class _SubtitleAnalysisScreenState extends State<SubtitleAnalysisScreen> {
     });
     
     try {
-      final translation = await _translationService.translateText(subtitleText);
+      final translation = await Provider.of<BailianTranslationService>(context, listen: false).translateText(subtitleText);
       
       setState(() {
         _translations[subtitleText] = translation;
@@ -459,6 +572,20 @@ class _SubtitleAnalysisScreenState extends State<SubtitleAnalysisScreen> {
     }
   }
   
+  // 重新分析字幕
+  Future<void> _reanalyzeSubtitles() async {
+    final analysisService = Provider.of<SubtitleAnalysisService>(context, listen: false);
+    final videoPath = widget.videoService.currentVideoPath;
+    final subtitlePath = widget.videoService.currentSubtitlePath;
+    
+    if (videoPath != null) {
+      // 清除缓存
+      analysisService.clearAnalysisCache(videoPath, subtitlePath);
+      // 重新分析
+      await _loadOrAnalyzeSubtitles();
+    }
+  }
+  
   @override
   void dispose() {
     super.dispose();
@@ -477,7 +604,7 @@ class _SubtitleAnalysisScreenState extends State<SubtitleAnalysisScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: '重新分析',
-            onPressed: _isAnalyzing ? null : _analyzeSubtitles,
+            onPressed: _isAnalyzing ? null : _reanalyzeSubtitles,
           ),
         ],
       ),

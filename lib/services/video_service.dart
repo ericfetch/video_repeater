@@ -12,6 +12,7 @@ import '../models/subtitle_model.dart';
 import 'config_service.dart';
 import 'youtube_service.dart';
 import 'download_info_service.dart';
+import 'subtitle_analysis_service.dart';
 
 class VideoService extends ChangeNotifier {
   Player? _player;
@@ -43,6 +44,9 @@ class VideoService extends ChangeNotifier {
   
   // 下载信息服务
   DownloadInfoService? _downloadInfoService;
+  
+  // 字幕分析服务
+  SubtitleAnalysisService? _subtitleAnalysisService;
   
   // 播放位置监听
   StreamSubscription<Duration>? _positionSubscription;
@@ -116,6 +120,11 @@ class VideoService extends ChangeNotifier {
   // 设置下载信息服务
   void setDownloadInfoService(DownloadInfoService downloadInfoService) {
     _downloadInfoService = downloadInfoService;
+  }
+  
+  // 设置字幕分析服务
+  void setSubtitleAnalysisService(SubtitleAnalysisService subtitleAnalysisService) {
+    _subtitleAnalysisService = subtitleAnalysisService;
   }
   
   void _onConfigChanged() {
@@ -711,6 +720,9 @@ class VideoService extends ChangeNotifier {
       
       // 打印字幕数据的详细信息
       _debugPrintSubtitleInfo();
+      
+      // 触发静默字幕分析
+      _triggerSilentAnalysis();
       
       notifyListeners();
       return true;
@@ -2000,5 +2012,26 @@ class VideoService extends ChangeNotifier {
     final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
     final milliseconds = (duration.inMilliseconds % 1000).toString().padLeft(3, '0');
     return '$hours:$minutes:$seconds.$milliseconds';
+  }
+  
+  // 触发静默字幕分析
+  void _triggerSilentAnalysis() {
+    // 检查是否有必要的数据和服务
+    if (_subtitleAnalysisService == null || 
+        _currentVideoPath == null || 
+        _subtitleData == null || 
+        _subtitleData!.entries.isEmpty) {
+      return;
+    }
+    
+    // 异步触发分析，不阻塞UI
+    Future.microtask(() async {
+      await _subtitleAnalysisService!.analyzeSubtitlesSilently(
+        videoPath: _currentVideoPath!,
+        subtitlePath: _currentSubtitlePath,
+        videoTitle: _videoTitle,
+        subtitles: _subtitleData!.entries,
+      );
+    });
   }
 } 

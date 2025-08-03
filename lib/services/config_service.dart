@@ -32,6 +32,10 @@ class ConfigService extends ChangeNotifier {
     'googleProjectId': '', // Google Cloud项目ID
     'translateTargetLanguage': 'zh-CN', // 翻译目标语言，默认为中文简体
     
+    // 百炼AI翻译设置
+    'bailianApiKey': '', // 百炼AI API密钥
+    'bailianAppId': '', // 百炼AI应用ID
+    
     // 界面设置
     'darkMode': false,
   };
@@ -88,6 +92,12 @@ class ConfigService extends ChangeNotifier {
   
   // 获取翻译目标语言
   String get translateTargetLanguage => _config['translateTargetLanguage'] ?? 'zh-CN';
+  
+  // 获取百炼AI API密钥
+  String? get bailianApiKey => _config['bailianApiKey'];
+  
+  // 获取百炼AI应用ID
+  String? get bailianAppId => _config['bailianAppId'];
   
   // 获取暗黑模式
   bool get darkMode => _config['darkMode'];
@@ -229,6 +239,20 @@ class ConfigService extends ChangeNotifier {
   // 更新翻译目标语言
   Future<void> updateTranslateTargetLanguage(String languageCode) async {
     _config['translateTargetLanguage'] = languageCode;
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新百炼AI API密钥
+  Future<void> updateBailianApiKey(String apiKey) async {
+    _config['bailianApiKey'] = apiKey;
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新百炼AI应用ID
+  Future<void> updateBailianAppId(String appId) async {
+    _config['bailianAppId'] = appId;
     await saveConfig();
     notifyListeners();
   }

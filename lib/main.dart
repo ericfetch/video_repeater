@@ -17,6 +17,7 @@ import 'services/download_info_service.dart';
 import 'services/dictionary_service.dart';
 import 'services/translation_service.dart';
 import 'services/bailian_translation_service.dart';
+import 'services/subtitle_analysis_service.dart';
 import 'models/history_model.dart';
 import 'screens/home_screen.dart';
 import 'screens/windows_requirements_screen.dart';
@@ -125,7 +126,21 @@ class MyApp extends StatelessWidget {
           update: (context, configService, previous) => 
               TranslationService(configService: configService),
         ),
-        Provider(create: (_) => BailianTranslationService()),
+        ProxyProvider<ConfigService, BailianTranslationService>(
+          update: (context, configService, previous) =>
+              BailianTranslationService(configService: configService),
+        ),
+        ChangeNotifierProxyProvider2<VocabularyService, DictionaryService, SubtitleAnalysisService>(
+          create: (context) => SubtitleAnalysisService(
+            vocabularyService: Provider.of<VocabularyService>(context, listen: false),
+            dictionaryService: Provider.of<DictionaryService>(context, listen: false),
+          ),
+          update: (context, vocabularyService, dictionaryService, previous) =>
+              previous ?? SubtitleAnalysisService(
+                vocabularyService: vocabularyService,
+                dictionaryService: dictionaryService,
+              ),
+        ),
       ],
       child: Consumer<ConfigService>(
         builder: (context, configService, child) {
@@ -136,6 +151,10 @@ class MyApp extends StatelessWidget {
           // 初始化下载信息服务
           final downloadInfoService = Provider.of<DownloadInfoService>(context, listen: false);
           videoService.setDownloadInfoService(downloadInfoService);
+          
+          // 初始化字幕分析服务
+          final subtitleAnalysisService = Provider.of<SubtitleAnalysisService>(context, listen: false);
+          videoService.setSubtitleAnalysisService(subtitleAnalysisService);
           
           // 初始化词典服务
           final dictionaryService = Provider.of<DictionaryService>(context, listen: false);
