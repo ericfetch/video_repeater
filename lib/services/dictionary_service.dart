@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/dictionary_word.dart';
 import '../models/history_model.dart';
+import '../utils/word_lemmatizer.dart';
 
 class DictionaryService extends ChangeNotifier {
   // 盒子名称
@@ -52,49 +53,34 @@ class DictionaryService extends ChangeNotifier {
         Hive.registerAdapter(DictionaryWordAdapter());
       }
       
+      // 数据库文件路径
+      final boxDir = await getApplicationDocumentsDirectory();
+      final dictionaryBoxPath = '${boxDir.path}/$_dictionaryBoxName.hive';
+      final vocabularyBoxPath = '${boxDir.path}/$_vocabularyBoxName.hive';
+      
+      // 创建自动备份
       try {
-        // 处理可能的数据迁移问题，尝试先删除旧盒子
-        try {
-          final boxDir = await getApplicationDocumentsDirectory();
-          final dictionaryBoxPath = '${boxDir.path}/$_dictionaryBoxName.hive';
-          final vocabularyBoxPath = '${boxDir.path}/$_vocabularyBoxName.hive';
-          
-          // 检查文件是否存在，存在则尝试删除
-          final dictionaryFile = File(dictionaryBoxPath);
-          final vocabularyFile = File(vocabularyBoxPath);
-          
-          if (await dictionaryFile.exists()) {
-            // 在删除前先备份
-            final backupPath = '${dictionaryBoxPath}_backup';
-            await dictionaryFile.copy(backupPath);
-            debugPrint('已备份词典数据到: $backupPath');
-            
-            // 尝试打开盒子，如果打开失败则删除
-            try {
-              await Hive.openBox<DictionaryWord>(_dictionaryBoxName);
-            } catch (e) {
-              debugPrint('打开词典盒子失败，将删除并重新创建: $e');
-              await Hive.deleteBoxFromDisk(_dictionaryBoxName);
-            }
-          }
-          
-          if (await vocabularyFile.exists()) {
-            final backupPath = '${vocabularyBoxPath}_backup';
-            await vocabularyFile.copy(backupPath);
-            debugPrint('已备份生词本数据到: $backupPath');
-            
-            try {
-              await Hive.openBox<DictionaryWord>(_vocabularyBoxName);
-            } catch (e) {
-              debugPrint('打开生词本盒子失败，将删除并重新创建: $e');
-              await Hive.deleteBoxFromDisk(_vocabularyBoxName);
-            }
-          }
-        } catch (e) {
-          debugPrint('处理数据迁移时出错: $e');
+        final dictionaryFile = File(dictionaryBoxPath);
+        final vocabularyFile = File(vocabularyBoxPath);
+        
+        // 如果文件存在，创建备份
+        if (await dictionaryFile.exists()) {
+          final backupPath = '${dictionaryBoxPath}_backup_${DateTime.now().millisecondsSinceEpoch}';
+          await dictionaryFile.copy(backupPath);
+          debugPrint('已创建词典数据备份: $backupPath');
         }
         
-        // 打开盒子
+        if (await vocabularyFile.exists()) {
+          final backupPath = '${vocabularyBoxPath}_backup_${DateTime.now().millisecondsSinceEpoch}';
+          await vocabularyFile.copy(backupPath);
+          debugPrint('已创建生词本数据备份: $backupPath');
+        }
+      } catch (e) {
+        debugPrint('创建数据备份失败，但会继续尝试打开数据库: $e');
+      }
+      
+      // 尝试打开数据库
+      try {
         debugPrint('尝试打开词典盒子: $_dictionaryBoxName');
         _dictionaryBox = await Hive.openBox<DictionaryWord>(_dictionaryBoxName);
         debugPrint('词典盒子打开成功，包含${_dictionaryBox.length}条记录');
@@ -104,18 +90,95 @@ class DictionaryService extends ChangeNotifier {
         debugPrint('生词本盒子打开成功，包含${_vocabularyBox.length}条记录');
       } catch (e) {
         debugPrint('打开盒子失败: $e');
-        // 如果打开失败，尝试完全重置
+        debugPrint('尝试从备份恢复...');
+        
+        // 尝试从备份恢复，而不是删除数据库
         try {
-          await Hive.deleteBoxFromDisk(_dictionaryBoxName);
-          await Hive.deleteBoxFromDisk(_vocabularyBoxName);
+          // 查找最新的备份文件
+          final directory = Directory(boxDir.path);
+          final backupFiles = await directory
+              .list()
+              .where((entity) => entity.path.contains('_backup_') && 
+                                 (entity.path.contains(_dictionaryBoxName) || 
+                                  entity.path.contains(_vocabularyBoxName)))
+              .toList();
           
-          _dictionaryBox = await Hive.openBox<DictionaryWord>(_dictionaryBoxName);
-          _vocabularyBox = await Hive.openBox<DictionaryWord>(_vocabularyBoxName);
-          
-          debugPrint('已重置并重新创建盒子');
+          if (backupFiles.isNotEmpty) {
+            // 按修改时间排序，找出最新的备份
+            backupFiles.sort((a, b) {
+              final aTime = a.statSync().modified;
+              final bTime = b.statSync().modified;
+              return bTime.compareTo(aTime); // 降序排列
+            });
+            
+            debugPrint('找到 ${backupFiles.length} 个备份文件，尝试使用最新的备份');
+            
+            // 尝试恢复词典备份
+            final dictionaryBackups = backupFiles
+                .where((f) => f.path.contains(_dictionaryBoxName))
+                .toList();
+            
+            if (dictionaryBackups.isNotEmpty) {
+              final latestBackup = dictionaryBackups.first;
+              debugPrint('尝试从备份恢复词典: ${latestBackup.path}');
+              
+              // 确保目标文件不存在
+              final targetFile = File(dictionaryBoxPath);
+              if (await targetFile.exists()) {
+                await targetFile.rename('${dictionaryBoxPath}_corrupted');
+              }
+              
+              // 复制备份到原位置
+              await File(latestBackup.path).copy(dictionaryBoxPath);
+              debugPrint('已从备份恢复词典数据库');
+            }
+            
+            // 尝试恢复生词本备份
+            final vocabularyBackups = backupFiles
+                .where((f) => f.path.contains(_vocabularyBoxName))
+                .toList();
+            
+            if (vocabularyBackups.isNotEmpty) {
+              final latestBackup = vocabularyBackups.first;
+              debugPrint('尝试从备份恢复生词本: ${latestBackup.path}');
+              
+              // 确保目标文件不存在
+              final targetFile = File(vocabularyBoxPath);
+              if (await targetFile.exists()) {
+                await targetFile.rename('${vocabularyBoxPath}_corrupted');
+              }
+              
+              // 复制备份到原位置
+              await File(latestBackup.path).copy(vocabularyBoxPath);
+              debugPrint('已从备份恢复生词本数据库');
+            }
+            
+            // 再次尝试打开盒子
+            debugPrint('从备份恢复后，再次尝试打开盒子');
+            _dictionaryBox = await Hive.openBox<DictionaryWord>(_dictionaryBoxName);
+            _vocabularyBox = await Hive.openBox<DictionaryWord>(_vocabularyBoxName);
+            debugPrint('成功从备份恢复并打开盒子');
+          } else {
+            debugPrint('未找到可用的备份文件，将创建新的空数据库');
+            // 创建新的空盒子，但不删除现有文件
+            _dictionaryBox = await Hive.openBox<DictionaryWord>(_dictionaryBoxName, 
+                                                              crashRecovery: true);
+            _vocabularyBox = await Hive.openBox<DictionaryWord>(_vocabularyBoxName,
+                                                             crashRecovery: true);
+          }
         } catch (e2) {
-          debugPrint('重置盒子失败: $e2');
-          throw Exception('无法初始化词典数据: $e2');
+          debugPrint('从备份恢复失败: $e2');
+          // 最后的尝试：创建新的空盒子，但不删除现有文件
+          try {
+            debugPrint('尝试使用crashRecovery模式打开盒子');
+            _dictionaryBox = await Hive.openBox<DictionaryWord>(_dictionaryBoxName, 
+                                                              crashRecovery: true);
+            _vocabularyBox = await Hive.openBox<DictionaryWord>(_vocabularyBoxName,
+                                                             crashRecovery: true);
+          } catch (e3) {
+            debugPrint('所有恢复尝试均失败: $e3');
+            throw Exception('无法初始化词典数据，请联系开发者: $e3');
+          }
         }
       }
       
@@ -806,5 +869,196 @@ class DictionaryService extends ChangeNotifier {
     }
     
     return result;
+  }
+
+  // 通过API查询单个单词信息（公开方法）
+  Future<bool> enrichSingleWordWithAPI(String word) async {
+    if (!_isInitialized) {
+      await initialize();
+    }
+    
+    try {
+      final result = await _enrichWordWithAPI(word);
+      return result['success'] == true;
+    } catch (e) {
+      debugPrint('查询单词 $word 释义失败: $e');
+      return false;
+    }
+  }
+  
+  // 清洗词典，将词汇还原到词根并合并重复项
+  Future<Map<String, dynamic>> cleanDictionary() async {
+    if (!_isInitialized) {
+      await initialize();
+    }
+    
+    debugPrint('开始清洗词典...');
+    
+    try {
+      // 获取所有现有单词
+      final allWords = _dictionaryBox.values.toList();
+      final originalCount = allWords.length;
+      
+      if (originalCount == 0) {
+        return {
+          'success': true,
+          'message': '词典为空，无需清洗',
+          'originalCount': 0,
+          'finalCount': 0,
+          'merged': 0,
+        };
+      }
+      
+      debugPrint('原始词典包含 $originalCount 个单词');
+      
+      // 词根到合并后单词的映射
+      final Map<String, DictionaryWord> lemmaToMergedWord = {};
+      final Map<String, List<DictionaryWord>> lemmaToOriginalWords = {};
+      
+      // 第一步：按词根分组
+      for (final word in allWords) {
+        // 使用新的词形还原算法获取词根
+        final lemma = ImprovedWordLemmatizer.lemmatize(word.word, LemmatizationMode.precise);
+        
+        if (!lemmaToOriginalWords.containsKey(lemma)) {
+          lemmaToOriginalWords[lemma] = [];
+        }
+        lemmaToOriginalWords[lemma]!.add(word);
+      }
+      
+      debugPrint('分组后得到 ${lemmaToOriginalWords.length} 个词根组');
+      
+      // 第二步：合并相同词根的单词
+      for (final entry in lemmaToOriginalWords.entries) {
+        final lemma = entry.key;
+        final wordsWithSameRoot = entry.value;
+        
+        if (wordsWithSameRoot.length == 1) {
+          // 只有一个单词，但需要更新为词根形式
+          final originalWord = wordsWithSameRoot.first;
+          final updatedWord = DictionaryWord(
+            word: lemma, // 使用词根作为新的单词
+            partOfSpeech: originalWord.partOfSpeech,
+            definition: originalWord.definition,
+            rank: originalWord.rank,
+            isFamiliar: originalWord.isFamiliar,
+            isVocabulary: originalWord.isVocabulary,
+            phonetic: originalWord.phonetic,
+            extraInfo: originalWord.extraInfo,
+          );
+          lemmaToMergedWord[lemma] = updatedWord;
+        } else {
+          // 多个单词需要合并
+          debugPrint('合并词根 "$lemma" 的 ${wordsWithSameRoot.length} 个变形: ${wordsWithSameRoot.map((w) => w.word).join(', ')}');
+          
+          // 选择最完整的信息进行合并
+          String? bestDefinition;
+          String? bestPhonetic;
+          String? bestPartOfSpeech;
+          Map<String, dynamic>? mergedExtraInfo;
+          int maxRank = 0;
+          bool anyFamiliar = false;
+          bool anyVocabulary = false;
+          
+          for (final word in wordsWithSameRoot) {
+            // 取最完整的定义
+            if (bestDefinition == null || (word.definition != null && word.definition!.length > bestDefinition.length)) {
+              bestDefinition = word.definition;
+            }
+            
+            // 取最完整的音标
+            if (bestPhonetic == null || (word.phonetic != null && word.phonetic!.length > bestPhonetic.length)) {
+              bestPhonetic = word.phonetic;
+            }
+            
+            // 取最完整的词性
+            if (bestPartOfSpeech == null || (word.partOfSpeech != null && word.partOfSpeech!.length > bestPartOfSpeech.length)) {
+              bestPartOfSpeech = word.partOfSpeech;
+            }
+            
+            // 取最高等级
+            if (word.rank != null && word.rank! > maxRank) {
+              maxRank = word.rank!;
+            }
+            
+            // 如果任何一个是熟知的，就标记为熟知
+            if (word.isFamiliar) {
+              anyFamiliar = true;
+            }
+            
+            // 如果任何一个在生词本中，就保持在生词本中
+            if (word.isVocabulary) {
+              anyVocabulary = true;
+            }
+            
+            // 合并额外信息
+            if (word.extraInfo != null) {
+              if (mergedExtraInfo == null) {
+                mergedExtraInfo = Map<String, dynamic>.from(word.extraInfo!);
+              } else {
+                mergedExtraInfo.addAll(word.extraInfo!);
+              }
+            }
+          }
+          
+          // 创建合并后的单词
+          final mergedWord = DictionaryWord(
+            word: lemma, // 使用词根作为新的单词
+            partOfSpeech: bestPartOfSpeech,
+            definition: bestDefinition,
+            rank: maxRank,
+            isFamiliar: anyFamiliar,
+            isVocabulary: anyVocabulary,
+            phonetic: bestPhonetic,
+            extraInfo: mergedExtraInfo,
+          );
+          
+          lemmaToMergedWord[lemma] = mergedWord;
+        }
+      }
+      
+      debugPrint('合并完成，最终得到 ${lemmaToMergedWord.length} 个单词');
+      
+      // 第三步：清空词典并写入合并后的单词
+      await _dictionaryBox.clear();
+      
+      final Map<String, DictionaryWord> wordsToAdd = {};
+      for (final entry in lemmaToMergedWord.entries) {
+        wordsToAdd[entry.key.toLowerCase()] = entry.value;
+      }
+      
+      await _dictionaryBox.putAll(wordsToAdd);
+      
+      final finalCount = _dictionaryBox.length;
+      final mergedCount = originalCount - finalCount;
+      
+      debugPrint('词典清洗完成：');
+      debugPrint('- 原始单词数: $originalCount');
+      debugPrint('- 最终单词数: $finalCount');
+      debugPrint('- 合并单词数: $mergedCount');
+      
+      // 通知监听器更新
+      notifyListeners();
+      
+      return {
+        'success': true,
+        'message': '词典清洗完成',
+        'originalCount': originalCount,
+        'finalCount': finalCount,
+        'merged': mergedCount,
+        'groups': lemmaToOriginalWords.length,
+      };
+      
+    } catch (e) {
+      debugPrint('清洗词典失败: $e');
+      debugPrintStack();
+      return {
+        'success': false,
+        'message': '清洗词典失败: $e',
+        'originalCount': 0,
+        'finalCount': 0,
+        'merged': 0,
+      };
+    }
   }
 } 

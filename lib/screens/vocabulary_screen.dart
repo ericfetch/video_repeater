@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../services/vocabulary_service.dart';
 import '../models/vocabulary_model.dart';
 import '../services/dictionary_service.dart';
 import '../models/dictionary_word.dart';
+import '../services/translation_service.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 class VocabularyScreen extends StatefulWidget {
   const VocabularyScreen({super.key});
@@ -23,6 +26,19 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
   List<String> _tags = [];
   String? _selectedTag;
   
+  // 是否已显示复习提示
+  bool _hasShownReviewTip = false;
+  
+  // 按天统计的单词数据
+  Map<DateTime, int> _wordsByDate = {};
+  
+  // 创建AudioPlayer实例
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  
+  // 当前正在复习的单词列表和索引
+  List<VocabularyWord> _reviewWords = [];
+  int _currentReviewIndex = 0;
+  
   @override
   void initState() {
     super.initState();
@@ -35,6 +51,32 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
       await vocabularyService.initialize();
       await vocabularyService.loadAllVocabularyLists();
     }
+    
+    // 加载按天统计的单词数据
+    _calculateWordsByDate();
+  }
+  
+  // 计算按天统计的单词数量
+  void _calculateWordsByDate() {
+    final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+    final allWords = vocabularyService.getAllWords();
+    
+    // 按天分组统计单词数量
+    final wordsByDate = <DateTime, int>{};
+    for (final word in allWords) {
+      // 只保留日期部分，忽略时间
+      final date = DateTime(
+        word.addedTime.year,
+        word.addedTime.month,
+        word.addedTime.day,
+      );
+      
+      wordsByDate[date] = (wordsByDate[date] ?? 0) + 1;
+    }
+    
+    setState(() {
+      _wordsByDate = wordsByDate;
+    });
   }
   
   void _toggleSelectionMode() {
@@ -267,6 +309,7 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
                 context: word.context,
                 addedTime: word.addedTime,
                 videoName: word.videoName,
+                audioPath: word.audioPath, // 保留音频路径
               );
               
               // 删除旧单词并添加新单词
@@ -541,179 +584,518 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
     }
   }
   
+  // 播放音频文件
+  Future<void> _playAudio(String? audioPath) async {
+    if (audioPath == null || audioPath.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('没有可用的音频'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    
+    try {
+      // 检查文件是否存在
+      final file = File(audioPath);
+      if (!await file.exists()) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('音频文件不存在: $audioPath'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+      
+      // 播放音频
+      await _audioPlayer.stop(); // 停止当前播放
+      await _audioPlayer.play(DeviceFileSource(audioPath));
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('正在播放音频'),
+          backgroundColor: Colors.blue,
+          duration: Duration(seconds: 1),
+        ),
+      );
+    } catch (e) {
+      debugPrint('播放音频失败: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('播放音频失败: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+  
+  // 检查是否有复习正在进行
+  bool _isReviewInProgress() {
+    return _reviewWords.isNotEmpty && _currentReviewIndex < _reviewWords.length;
+  }
+  
+  // 开始自动复习
+  void _startAutoReview() {
+    // 始终重置复习状态，确保每次都是全新开始
+    _reviewWords = [];
+    _currentReviewIndex = 0;
+    
+    final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+    final allWords = vocabularyService.getAllWords();
+    
+    if (allWords.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('生词本为空，无法开始复习'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    
+    // 随机打乱单词顺序
+    _reviewWords = List.from(allWords)..shuffle();
+    _currentReviewIndex = 0;
+    
+    // 显示第一个单词
+    _showReviewDialog();
+  }
+  
+  // 显示复习对话框
+  void _showReviewDialog() {
+    if (_reviewWords.isEmpty || _currentReviewIndex >= _reviewWords.length) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('复习完成！'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      return;
+    }
+    
+    final currentWord = _reviewWords[_currentReviewIndex];
+    
+    // 如果有音频，自动播放
+    if (currentWord.audioPath != null && currentWord.audioPath!.isNotEmpty) {
+      _playAudio(currentWord.audioPath);
+    }
+    
+    // 标记正在导航到下一个单词，防止对话框关闭时错误地重置状态
+    bool isNavigatingToNext = false;
+    
+    // 翻译相关的状态变量
+    bool isTranslating = false;
+    String? translatedText;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false, // 不允许点击外部关闭
+      builder: (dialogContext) {
+        // 使用StatefulBuilder以便能够在对话框内更新状态
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                '复习单词 (${_currentReviewIndex + 1}/${_reviewWords.length})',
+                style: const TextStyle(fontSize: 18),
+              ),
+            ),
+            // 关闭按钮
+            IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () {
+                // 中断复习，重置状态
+                _reviewWords = [];
+                _currentReviewIndex = 0;
+                Navigator.of(context).pop();
+                
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('复习已中断，下次将重新开始'),
+                    backgroundColor: Colors.orange,
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+              content: SingleChildScrollView(
+                child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  currentWord.word,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Spacer(),
+                // 复制按钮 - 无提示
+                IconButton(
+                  icon: const Icon(Icons.content_copy, size: 18),
+                  tooltip: '复制单词',
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: currentWord.word));
+                    // 不显示提示
+                  },
+                ),
+              ],
+            ),
+            // 显示记忆次数
+            Text(
+              '已记住: ${currentWord.rememberedCount}次',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.blue,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '上下文: ${currentWord.context}',
+              style: const TextStyle(fontSize: 16),
+            ),
+                    const SizedBox(height: 8),
+                    
+                    // 添加翻译按钮和翻译结果显示区域
+                    Row(
+                      children: [
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.translate),
+                          label: Text(isTranslating ? '翻译中...' : '翻译上下文'),
+                          onPressed: isTranslating ? null : () async {
+                            // 设置翻译中状态
+                            setState(() {
+                              isTranslating = true;
+                            });
+                            
+                            try {
+                              // 获取翻译服务
+                              final translationService = Provider.of<TranslationService>(dialogContext, listen: false);
+                              // 翻译上下文文本
+                              final translated = await translationService.translateText(
+                                text: currentWord.context,
+                              );
+                              
+                              // 更新翻译结果
+                              setState(() {
+                                translatedText = translated;
+                                isTranslating = false;
+                              });
+                            } catch (e) {
+                              // 翻译失败
+                              setState(() {
+                                translatedText = "翻译失败: $e";
+                                isTranslating = false;
+                              });
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                    
+                    // 显示翻译结果
+                    if (translatedText != null) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              '翻译:',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              translatedText!,
+                              style: const TextStyle(fontSize: 15),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    
+            const SizedBox(height: 8),
+            Text(
+              '视频: ${currentWord.videoName}',
+              style: const TextStyle(fontSize: 14, color: Colors.grey),
+            ),
+            if (currentWord.audioPath != null && currentWord.audioPath!.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.volume_up),
+                label: const Text('重新播放音频'),
+                onPressed: () => _playAudio(currentWord.audioPath),
+              ),
+            ],
+          ],
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              isNavigatingToNext = true;
+              Navigator.of(context).pop();
+              _currentReviewIndex++;
+              
+              // 如果还有单词，继续复习
+              if (_currentReviewIndex < _reviewWords.length) {
+                _showReviewDialog();
+              } else {
+                // 复习完成，重置状态
+                _reviewWords = [];
+                _currentReviewIndex = 0;
+                
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('复习完成！'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              }
+            },
+            child: const Text('不记得'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
+              final currentWord = _reviewWords[_currentReviewIndex];
+              
+              // 增加记忆次数
+              await vocabularyService.increaseRememberedCount(
+                currentWord.videoName,
+                currentWord.word,
+              );
+              
+              // 标记正在导航到下一个单词
+              isNavigatingToNext = true;
+              Navigator.of(context).pop();
+              _currentReviewIndex++;
+              
+              // 如果还有单词，继续复习
+              if (_currentReviewIndex < _reviewWords.length) {
+                _showReviewDialog();
+              } else {
+                // 复习完成，重置状态
+                _reviewWords = [];
+                _currentReviewIndex = 0;
+                
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('复习完成！'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              }
+            },
+            child: const Text('记得'),
+          ),
+        ],
+            );
+          }
+        );
+      },
+    ).then((_) {
+      // 对话框关闭时（包括通过返回按钮关闭），重置状态
+      // 但如果是正在导航到下一个单词，则不重置
+      if (_reviewWords.isNotEmpty && !isNavigatingToNext) {
+        _reviewWords = [];
+        _currentReviewIndex = 0;
+      }
+    });
+  }
+  
+  @override
+  void dispose() {
+    _audioPlayer.dispose();
+    _searchController.dispose();
+    // 重置复习状态
+    _reviewWords = [];
+    _currentReviewIndex = 0;
+    super.dispose();
+  }
+  
   @override
   Widget build(BuildContext context) {
-    // 获取服务但不监听变化
-    final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
-    final dictionaryService = Provider.of<DictionaryService>(context, listen: false);
-    
-    // 获取单词列表（现在有缓存，不会频繁触发数据库访问）
-    final allWords = vocabularyService.getAllWords();
+    final vocabularyService = Provider.of<VocabularyService>(context);
+    final allWords = vocabularyService.getAllWords(isActive: true);
     
     return Scaffold(
       appBar: AppBar(
         title: const Text('生词本'),
         actions: [
-          if (_isSelectionMode) ...[
-            // 选择模式下的操作按钮
+          // 自动复习按钮
+          if (!_isSelectionMode)
+            IconButton(
+              icon: const Icon(Icons.auto_stories),
+              tooltip: '自动复习（随机显示单词，记住10次后自动标记为熟知）',
+              onPressed: () {
+                // 显示提示对话框，解释功能
+                if (!_hasShownReviewTip) {
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('自动复习功能'),
+                      content: const Text(
+                        '自动复习将随机显示您的生词本中的单词和上下文，'
+                        '如果有音频将自动播放。\n\n'
+                        '每次您选择"记得"，系统会记录下来，当一个单词被记住10次后，'
+                        '它将被标记为熟知并从生词本中移除。\n\n'
+                        '您可以随时中断复习，下次将重新开始。'
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                            // 标记已显示提示
+                            _hasShownReviewTip = true;
+                            // 开始复习
+                            _startAutoReview();
+                          },
+                          child: const Text('开始复习'),
+                        ),
+                      ],
+                    ),
+                  );
+                } else {
+                  // 直接开始复习
+                  _startAutoReview();
+                }
+              },
+            ),
+          
+          // 选择模式切换按钮
+          IconButton(
+            icon: Icon(_isSelectionMode ? Icons.close : Icons.select_all),
+            onPressed: _toggleSelectionMode,
+          ),
+          
+          // 复制选中单词按钮
+          if (_isSelectionMode && _selectedWords.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.copy),
-              tooltip: '复制选中单词',
-              onPressed: _selectedWords.isNotEmpty ? _copySelectedWords : null,
+              onPressed: _copySelectedWords,
             ),
-            IconButton(
-              icon: const Icon(Icons.delete),
-              tooltip: '删除选中单词',
-              onPressed: _selectedWords.isNotEmpty ? _deleteSelectedWords : null,
-            ),
-            IconButton(
-              icon: const Icon(Icons.close),
-              tooltip: '取消选择',
-              onPressed: _toggleSelectionMode,
-            ),
-          ] else ...[
-            // 导入按钮
+          
+          // 导入按钮
+          if (!_isSelectionMode)
             IconButton(
               icon: const Icon(Icons.file_upload),
               tooltip: '导入生词本备份',
               onPressed: _importFromFile,
             ),
-            // 导出按钮
+            
+          // 导出按钮
+          if (!_isSelectionMode)
             IconButton(
               icon: const Icon(Icons.file_download),
               tooltip: '导出生词本备份',
               onPressed: _exportJsonBackup,
             ),
-            // 其他操作菜单
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert),
-              onSelected: (value) async {
-                if (value == 'export_txt') {
-                  // 导出为文本
-                  final content = vocabularyService.exportVocabularyAsText();
-                  _saveToFile(content, 'vocabulary.txt');
-                } else if (value == 'export_csv') {
-                  // 导出为CSV
-                  final content = vocabularyService.exportVocabularyAsCSV();
-                  _saveToFile(content, 'vocabulary.csv');
-                } else if (value == 'clear') {
-                  // 清空生词本
-                  final confirmed = await showDialog<bool>(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text('确认清空'),
-                      content: const Text('确定要清空所有生词本吗？此操作不可撤销。'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(false),
-                          child: const Text('取消'),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(true),
-                          child: const Text('确定'),
-                        ),
-                      ],
-                    ),
-                  ) ?? false;
-                  
-                  if (confirmed) {
-                    await vocabularyService.clearVocabulary();
-                    setState(() {});
-                  }
-                } else if (value == 'repair') {
-                  // 修复数据库
-                  await _repairDatabase();
+          
+          // 更多操作按钮
+          PopupMenuButton<String>(
+            onSelected: (value) async {
+              if (value == 'export_txt') {
+                // 导出为文本
+                final content = vocabularyService.exportVocabularyAsText();
+                await _saveToFile(content, 'vocabulary.txt');
+              } else if (value == 'export_csv') {
+                // 导出为CSV
+                final content = vocabularyService.exportVocabularyAsCSV();
+                await _saveToFile(content, 'vocabulary.csv');
+              } else if (value == 'export_json') {
+                // 导出JSON备份
+                await _exportJsonBackup();
+              } else if (value == 'import_json') {
+                // 导入JSON备份
+                await _importFromFile();
+              } else if (value == 'clear') {
+                // 清空生词本
+                final confirmed = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('确认清空'),
+                    content: const Text('确定要清空所有生词本吗？此操作不可撤销。'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(false),
+                        child: const Text('取消'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(true),
+                        child: const Text('确定'),
+                      ),
+                    ],
+                  ),
+                ) ?? false;
+                
+                if (confirmed) {
+                  await vocabularyService.clearVocabulary();
+                  setState(() {});
                 }
-              },
-              itemBuilder: (context) => [
-                const PopupMenuItem<String>(
-                  value: 'export_txt',
-                  child: Text('导出为文本'),
-                ),
-                const PopupMenuItem<String>(
-                  value: 'export_csv',
-                  child: Text('导出为CSV'),
-                ),
-                const PopupMenuItem<String>(
-                  value: 'clear',
-                  child: Text('清空生词本'),
-                ),
-                const PopupMenuItem<String>(
-                  value: 'repair',
-                  child: Text('修复数据库'),
-                ),
-              ],
-            ),
-          ],
+              } else if (value == 'repair') {
+                // 修复数据库
+                await _repairDatabase();
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem<String>(
+                value: 'export_txt',
+                child: Text('导出为文本'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'export_csv',
+                child: Text('导出为CSV'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'export_json',
+                child: Text('导出JSON备份'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'import_json',
+                child: Text('导入JSON备份'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'clear',
+                child: Text('清空生词本'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'repair',
+                child: Text('修复数据库'),
+              ),
+            ],
+          ),
         ],
       ),
       body: Column(
         children: [
-          // 词典搜索栏
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                labelText: '搜索单词',
-                hintText: '输入要查询的单词',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _searchController.text.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear),
-                      onPressed: () {
-                        _searchController.clear();
-                        setState(() {});
-                      },
-                    )
-                  : null,
-                border: const OutlineInputBorder(),
-              ),
-              onChanged: (_) => setState(() {}),
+          // 按天统计的单词数量曲线图
+          if (_wordsByDate.isNotEmpty)
+            Container(
+              height: 150, // 控制图表高度不要太高
+              padding: const EdgeInsets.all(8.0),
+              child: _buildWordsChart(),
             ),
-          ),
-          
-          // 标签过滤器
-          if (_tags.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    // 全部标签
-                    Padding(
-                      padding: const EdgeInsets.only(right: 4.0),
-                      child: FilterChip(
-                        label: const Text('全部'),
-                        selected: _selectedTag == null,
-                        onSelected: (_) {
-                          setState(() {
-                            _selectedTag = null;
-                          });
-                        },
-                      ),
-                    ),
-                    
-                    // 视频标签
-                    for (final tag in _tags)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 4.0),
-                        child: FilterChip(
-                          label: Text(tag),
-                          selected: _selectedTag == tag,
-                          onSelected: (_) {
-                            setState(() {
-                              _selectedTag = tag;
-                            });
-                          },
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          
+            
           // 选择工具栏
           if (_isSelectionMode && _selectedWords.isNotEmpty)
             Padding(
@@ -749,7 +1131,144 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
         : null,
     );
   }
-
+  
+  // 构建单词数量曲线图
+  Widget _buildWordsChart() {
+    // 如果没有数据，显示提示
+    if (_wordsByDate.isEmpty) {
+      return const Center(child: Text('没有单词数据'));
+    }
+    
+    // 获取最近30天的数据
+    final now = DateTime.now();
+    final thirtyDaysAgo = now.subtract(const Duration(days: 30));
+    
+    // 按日期排序的数据点
+    final sortedData = _wordsByDate.entries
+        .where((entry) => entry.key.isAfter(thirtyDaysAgo))
+        .toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    
+    // 如果没有最近30天的数据，显示提示
+    if (sortedData.isEmpty) {
+      return const Center(child: Text('最近30天没有新增单词'));
+    }
+    
+    // 准备曲线图数据
+    final spots = <FlSpot>[];
+    for (int i = 0; i < sortedData.length; i++) {
+      spots.add(FlSpot(i.toDouble(), sortedData[i].value.toDouble()));
+    }
+    
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: LineChart(
+        LineChartData(
+          gridData: FlGridData(
+            show: true,
+            drawVerticalLine: true,
+            getDrawingHorizontalLine: (value) => FlLine(
+              color: Colors.white24,
+              strokeWidth: 1,
+            ),
+            getDrawingVerticalLine: (value) => FlLine(
+              color: Colors.white24,
+              strokeWidth: 1,
+            ),
+          ),
+          titlesData: FlTitlesData(
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 30,
+                getTitlesWidget: (value, meta) {
+                  if (value % 5 == 0 && value.toInt() < sortedData.length) {
+                    final date = sortedData[value.toInt()].key;
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Text(
+                        '${date.day}/${date.month}',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 10,
+                        ),
+                      ),
+                    );
+                  }
+                  return const SizedBox();
+                },
+              ),
+            ),
+            leftTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                getTitlesWidget: (value, meta) {
+                  return Text(
+                    value.toInt().toString(),
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 10,
+                    ),
+                  );
+                },
+                reservedSize: 42,
+              ),
+            ),
+            topTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+            rightTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+          ),
+          borderData: FlBorderData(
+            show: true,
+            border: Border.all(color: Colors.white38),
+          ),
+          minX: 0,
+          maxX: (sortedData.length - 1).toDouble(),
+          minY: 0,
+          maxY: sortedData.map((e) => e.value).reduce((a, b) => a > b ? a : b).toDouble() * 1.2,
+          lineBarsData: [
+            LineChartBarData(
+              spots: spots,
+              isCurved: true,
+              color: Colors.cyan,
+              barWidth: 3,
+              isStrokeCapRound: true,
+              dotData: FlDotData(
+                show: true,
+              ),
+              belowBarData: BarAreaData(
+                show: true,
+                color: Colors.cyan.withOpacity(0.3),
+              ),
+            ),
+          ],
+          lineTouchData: LineTouchData(
+            touchTooltipData: LineTouchTooltipData(
+              getTooltipItems: (touchedSpots) {
+                return touchedSpots.map((spot) {
+                  final index = spot.x.toInt();
+                  if (index >= 0 && index < sortedData.length) {
+                    final date = sortedData[index].key;
+                    return LineTooltipItem(
+                      '${date.day}/${date.month}: ${spot.y.toInt()}个单词',
+                      const TextStyle(color: Colors.white),
+                    );
+                  }
+                  return null;
+                }).toList();
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+  
   Widget _buildWordList(List<VocabularyWord> words) {
     if (words.isEmpty) {
       return const Center(child: Text('生词本为空'));
@@ -819,6 +1338,13 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // 音频播放按钮
+                if (word.audioPath != null && word.audioPath!.isNotEmpty)
+                  IconButton(
+                    icon: const Icon(Icons.volume_up, color: Colors.blue),
+                    tooltip: '播放音频',
+                    onPressed: () => _playAudio(word.audioPath),
+                  ),
                 IconButton(
                   icon: const Icon(Icons.content_copy),
                   tooltip: '复制单词',
@@ -898,6 +1424,14 @@ class _VocabularyScreenState extends State<VocabularyScreen> {
                               Text('上下文: ${word.context}'),
                               Text('视频: ${word.videoName}'),
                               Text('添加时间: ${word.addedTime.toString().split('.')[0]}'),
+                              if (word.audioPath != null && word.audioPath!.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                ElevatedButton.icon(
+                                  icon: const Icon(Icons.volume_up),
+                                  label: const Text('播放音频'),
+                                  onPressed: () => _playAudio(word.audioPath),
+                                ),
+                              ],
                             ],
                           ),
                         ),

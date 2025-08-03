@@ -38,12 +38,29 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
   final _subtitleFontSizeController = TextEditingController();
   final _subtitleSuffixesController = TextEditingController();
   final _youtubeDownloadPathController = TextEditingController();
+  final _googleTranslateApiKeyController = TextEditingController();
+  final _googleProjectIdController = TextEditingController();
   
   // 设置值
   bool _isDarkMode = false;
   bool _isBoldFont = false;
   bool _autoMatchSubtitle = true;
   String _subtitleMatchMode = 'same';
+  String _translateTargetLanguage = 'zh-CN';
+  
+  // 常用语言列表
+  final List<Map<String, String>> _commonLanguages = [
+    {'code': 'zh-CN', 'name': '中文(简体)'},
+    {'code': 'zh-TW', 'name': '中文(繁体)'},
+    {'code': 'en', 'name': '英语'},
+    {'code': 'ja', 'name': '日语'},
+    {'code': 'ko', 'name': '韩语'},
+    {'code': 'fr', 'name': '法语'},
+    {'code': 'de', 'name': '德语'},
+    {'code': 'es', 'name': '西班牙语'},
+    {'code': 'ru', 'name': '俄语'},
+    {'code': 'ar', 'name': '阿拉伯语'},
+  ];
   
   // 确保只初始化一次
   bool _initialized = false;
@@ -69,6 +86,8 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
     _subtitleFontSizeController.text = configService.subtitleFontSize.toString();
     _subtitleSuffixesController.text = configService.subtitleSuffixes.join(', ');
     _youtubeDownloadPathController.text = configService.youtubeDownloadPath;
+    _googleTranslateApiKeyController.text = configService.googleTranslateApiKey ?? '';
+    _googleProjectIdController.text = configService.googleProjectId ?? '';
     
     // 更新设置值
     setState(() {
@@ -76,6 +95,7 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
       _isBoldFont = configService.subtitleFontWeight == FontWeight.bold;
       _autoMatchSubtitle = configService.autoMatchSubtitle;
       _subtitleMatchMode = configService.subtitleMatchMode;
+      _translateTargetLanguage = configService.translateTargetLanguage;
       _initialized = true;
     });
   }
@@ -87,6 +107,8 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
     _subtitleFontSizeController.dispose();
     _subtitleSuffixesController.dispose();
     _youtubeDownloadPathController.dispose();
+    _googleTranslateApiKeyController.dispose();
+    _googleProjectIdController.dispose();
     
     // 恢复视频播放状态
     if (widget.wasPlaying) {
@@ -142,6 +164,11 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
     
     // 保存YouTube下载路径
     configService.updateYoutubeDownloadPath(_youtubeDownloadPathController.text);
+    
+    // 保存Google Cloud Translation API设置
+    configService.updateGoogleTranslateApiKey(_googleTranslateApiKeyController.text);
+    configService.updateGoogleProjectId(_googleProjectIdController.text);
+    configService.updateTranslateTargetLanguage(_translateTargetLanguage);
     
     // 保存其他设置
     configService.updateSubtitleFontWeight(_isBoldFont);
@@ -480,7 +507,104 @@ class _ConfigScreenContentState extends State<_ConfigScreenContent> {
                 ),
               ),
               
-
+              const SizedBox(height: 24),
+              
+              // Google Cloud Translation API设置
+              const Text(
+                'Google Cloud Translation API设置',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const Divider(),
+              
+              // Google API密钥
+              StatefulBuilder(
+                builder: (context, setState) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Google API密钥'),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _googleTranslateApiKeyController,
+                        decoration: const InputDecoration(
+                          hintText: '例如: AIzaSyBcD4uZzXZzXZzXZzXZzXZzXZzXZzXZzX',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Google Cloud Translation API的API密钥',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              
+              // Google项目ID
+              StatefulBuilder(
+                builder: (context, setState) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Google项目ID'),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _googleProjectIdController,
+                        decoration: const InputDecoration(
+                          hintText: '例如: your-project-id',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Google Cloud Translation API的项目ID',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              
+              // 翻译目标语言
+              StatefulBuilder(
+                builder: (context, setState) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('翻译目标语言'),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        value: _translateTargetLanguage,
+                        decoration: const InputDecoration(
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _commonLanguages.map((language) {
+                          return DropdownMenuItem<String>(
+                            value: language['code'],
+                            child: Text('${language['name']} (${language['code']})'),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() {
+                              _translateTargetLanguage = value;
+                            });
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        '翻译结果的目标语言',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               
               const SizedBox(height: 24),
               

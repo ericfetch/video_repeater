@@ -1,11 +1,23 @@
 import 'package:stemmer/stemmer.dart';
+import 'package:lemmatizerx/lemmatizerx.dart';
 
-/// 词形还原工具类，用于将单词还原为基本形式
-class WordLemmatizer {
+/// 词形还原模式
+enum LemmatizationMode {
+  /// 关闭词形还原，保持原词
+  off,
+  /// 简单模式，仅处理明显的复数和时态
+  simple,
+  /// 精确模式，使用先进的词形还原算法
+  precise,
+}
+
+/// 改进的词形还原工具类
+class ImprovedWordLemmatizer {
   static final PorterStemmer _stemmer = PorterStemmer();
+  static final Lemmatizer _precisionLemmatizer = Lemmatizer();
   
-  // 常见的不规则动词过去式和过去分词映射
-  static final Map<String, String> _irregularVerbs = {
+  // 简单模式的安全规则 - 只处理明显正确的情况
+  static final Map<String, String> _safeIrregularVerbs = {
     'was': 'be',
     'were': 'be',
     'been': 'be',
@@ -31,118 +43,13 @@ class WordLemmatizer {
     'found': 'find',
     'thought': 'think',
     'told': 'tell',
-    'became': 'become',
-    'shown': 'show',
-    'showed': 'show',
-    'left': 'leave',
-    'felt': 'feel',
-    'brought': 'bring',
-    'bought': 'buy',
-    'meant': 'mean',
-    'sent': 'send',
-    'paid': 'pay',
-    'built': 'build',
-    'understood': 'understand',
-    'kept': 'keep',
-    'let': 'let',
-    'put': 'put',
-    'set': 'set',
     'ran': 'run',
-    'sat': 'sit',
-    'spoke': 'speak',
-    'spoken': 'speak',
-    'stood': 'stand',
-    'won': 'win',
-    'heard': 'hear',
-    'held': 'hold',
-    'met': 'meet',
-    'lost': 'lose',
-    'read': 'read',  // 相同拼写但发音不同
     'ate': 'eat',
     'eaten': 'eat',
-    'flew': 'fly',
-    'flown': 'fly',
-    'grew': 'grow',
-    'grown': 'grow',
-    'drew': 'draw',
-    'drawn': 'draw',
-    'threw': 'throw',
-    'thrown': 'throw',
-    'knew': 'know',
-    'known': 'know',
-    'drove': 'drive',
-    'driven': 'drive',
-    'wrote': 'write',
-    'written': 'write',
-    'rode': 'ride',
-    'ridden': 'ride',
-    'rose': 'rise',
-    'risen': 'rise',
-    'chose': 'choose',
-    'chosen': 'choose',
-    'broke': 'break',
-    'broken': 'break',
-    'spoke': 'speak',
-    'spoken': 'speak',
-    'stole': 'steal',
-    'stolen': 'steal',
-    'froze': 'freeze',
-    'frozen': 'freeze',
-    'forgot': 'forget',
-    'forgotten': 'forget',
-    'swam': 'swim',
-    'swum': 'swim',
-    'began': 'begin',
-    'begun': 'begin',
-    'rang': 'ring',
-    'rung': 'ring',
-    'sang': 'sing',
-    'sung': 'sing',
-    'sank': 'sink',
-    'sunk': 'sink',
-    'drank': 'drink',
-    'drunk': 'drink',
-    'shrank': 'shrink',
-    'shrunk': 'shrink',
-    'sprang': 'spring',
-    'sprung': 'spring',
-    'swore': 'swear',
-    'sworn': 'swear',
-    'tore': 'tear',
-    'torn': 'tear',
-    'wore': 'wear',
-    'worn': 'wear',
-    'woke': 'wake',
-    'woken': 'wake',
-    'blew': 'blow',
-    'blown': 'blow',
-    'slept': 'sleep',
-    'crept': 'creep',
-    'wept': 'weep',
-    'dealt': 'deal',
-    'meant': 'mean',
-    'dreamt': 'dream',
-    'dreamed': 'dream',
-    'leapt': 'leap',
-    'leaped': 'leap',
-    'felt': 'feel',
-    'knelt': 'kneel',
-    'kneeled': 'kneel',
-    'sought': 'seek',
-    'taught': 'teach',
-    'caught': 'catch',
-    'brought': 'bring',
-    'bought': 'buy',
-    'fought': 'fight',
-    'thought': 'think',
-    'dug': 'dig',
-    'hung': 'hang',
-    'stuck': 'stick',
-    'struck': 'strike',
   };
   
-  // 常见的不规则名词复数映射
-  static final Map<String, String> _irregularNouns = {
+  // 简单模式的安全复数规则
+  static final Map<String, String> _safeIrregularNouns = {
     'men': 'man',
     'women': 'woman',
     'children': 'child',
@@ -150,263 +57,152 @@ class WordLemmatizer {
     'mice': 'mouse',
     'teeth': 'tooth',
     'feet': 'foot',
-    'geese': 'goose',
-    'oxen': 'ox',
-    'knives': 'knife',
-    'lives': 'life',
-    'wives': 'wife',
-    'shelves': 'shelf',
-    'wolves': 'wolf',
-    'leaves': 'leaf',
-    'loaves': 'loaf',
-    'thieves': 'thief',
-    'potatoes': 'potato',
-    'tomatoes': 'tomato',
-    'heroes': 'hero',
-    'echoes': 'echo',
-    'analyses': 'analysis',
-    'criteria': 'criterion',
-    'phenomena': 'phenomenon',
-    'data': 'datum',
-    'media': 'medium',
-    'cacti': 'cactus',
-    'fungi': 'fungus',
-    'alumni': 'alumnus',
-    'vertices': 'vertex',
-    'indices': 'index',
-    'matrices': 'matrix',
-    'appendices': 'appendix',
-    'crises': 'crisis',
-    'diagnoses': 'diagnosis',
-    'hypotheses': 'hypothesis',
-    'oases': 'oasis',
-    'parentheses': 'parenthesis',
-    'theses': 'thesis',
-    'bases': 'basis',
-    'axes': 'axis',
-    'foci': 'focus',
-    'nuclei': 'nucleus',
-    'stimuli': 'stimulus',
-    'syllabi': 'syllabus',
-    'radii': 'radius',
-    'bacteria': 'bacterium',
-    'curricula': 'curriculum',
-    'memoranda': 'memorandum',
-    'strata': 'stratum',
-    'larvae': 'larva',
-    'antennae': 'antenna',
-    'formulae': 'formula',
-    'nebulae': 'nebula',
-    'vertebrae': 'vertebra',
-    'vitae': 'vita',
   };
   
-  // 特殊处理的形容词，这些词以ed结尾但不应该被还原
-  static final Set<String> _specialAdjectives = {
-    'advanced',
-    'aged',
-    'alleged',
-    'beloved',
-    'blessed',
-    'complicated',
-    'confused',
-    'detailed',
-    'disappointed',
-    'educated',
-    'excited',
-    'experienced',
-    'interested',
-    'limited',
-    'motivated',
-    'prepared',
-    'qualified',
-    'sophisticated',
-    'surprised',
-    'tired',
-    'unexpected',
-    'unbalanced',
-    'undecided',
-    'united',
-    'unwanted',
-    'used',
-    'wicked',
+  // 不应该被还原的单词（它们本身就是词根）
+  static final Set<String> _doNotLemmatize = {
+    'news', 'class', 'glass', 'bass', 'mass', 'pass', 'grass', 'brass',
+    'address', 'process', 'success', 'access', 'express', 'dress',
+    'stress', 'press', 'progress', 'business', 'witness', 'fitness',
+    'this', 'thus', 'plus', 'yes', 'less', 'unless', 'endless',
+    'regardless', 'nevertheless', 'consensus', 'analysis', 'basis',
+    'crisis', 'diagnosis', 'emphasis', 'hypothesis', 'oasis', 'synthesis',
+    'thanks', 'perhaps', 'mathematics', 'physics', 'graphics', 'politics',
+    'economics', 'athletics', 'statistics', 'tactics', 'dynamics',
+    'its', 'his', 'hers', 'ours', 'yours', 'theirs',
+    'always', 'sometimes', 'nowadays', 'towards', 'afterwards',
   };
-  
-  // 特殊的ing形式单词映射
-  static final Map<String, String> _specialIngForms = {
-    'punting': 'punt',
-    'hunting': 'hunt',
-    'bunting': 'bunt',
-    'shunting': 'shunt',
-    'fronting': 'front',
-    'counting': 'count',
-    'mounting': 'mount',
-    'accounting': 'account',
-    'discounting': 'discount',
-    'recounting': 'recount',
-    'surmounting': 'surmount',
-    'confronting': 'confront',
-    'grunting': 'grunt',
-    'stunting': 'stunt',
-    'wanting': 'want',
-    'planting': 'plant',
-    'granting': 'grant',
-    'slanting': 'slant',
-    'chanting': 'chant',
-    'ranting': 'rant',
-    'panting': 'pant',
-    'venting': 'vent',
-    'denting': 'dent',
-    'renting': 'rent',
-    'tenting': 'tent',
-    'inventing': 'invent',
-    'preventing': 'prevent',
-    'consenting': 'consent',
-    'relenting': 'relent',
-    'repenting': 'repent',
-    'printing': 'print',
-    'sprinting': 'sprint',
-    'squinting': 'squint',
-    'hinting': 'hint',
-    'tinting': 'tint',
-    'stinting': 'stint',
-    'pointing': 'point',
-    'jointing': 'joint',
-    'anointing': 'anoint',
-    'disappointing': 'disappoint',
-    'lifting': 'lift',
-    'shifting': 'shift',
-    'drifting': 'drift',
-    'gifting': 'gift',
-    'sifting': 'sift',
-    'listing': 'list',
-    'twisting': 'twist',
-    'existing': 'exist',
-    'insisting': 'insist',
-    'persisting': 'persist',
-    'resisting': 'resist',
-    'assisting': 'assist',
-    'consisting': 'consist',
-    'enlisting': 'enlist',
-    'costing': 'cost',
-    'posting': 'post',
-    'hosting': 'host',
-    'roasting': 'roast',
-    'boasting': 'boast',
-    'toasting': 'toast',
-    'ghosting': 'ghost',
-  };
-  
-  /// 将单词还原为基本形式
-  /// 
-  /// 处理流程：
-  /// 1. 检查是否是特殊形容词
-  /// 2. 检查是否是不规则动词或名词
-  /// 3. 检查特殊的ing形式单词
-  /// 4. 处理常见的后缀规则
-  /// 5. 使用Porter词干提取算法（但避免过度还原）
-  static String lemmatize(String word) {
+
+  /// 根据指定模式对单词进行词形还原
+  static String lemmatize(String word, LemmatizationMode mode) {
     if (word.isEmpty) return word;
     
-    // 转为小写
     final lowercaseWord = word.toLowerCase();
     
-    // 检查是否是特殊形容词
-    if (_specialAdjectives.contains(lowercaseWord)) {
-      return lowercaseWord;
+    switch (mode) {
+      case LemmatizationMode.off:
+        return lowercaseWord;
+        
+      case LemmatizationMode.simple:
+        return _simpleLemmatize(lowercaseWord);
+        
+      case LemmatizationMode.precise:
+        return _preciseLemmatize(lowercaseWord);
+    }
+  }
+  
+  /// 简单模式：只处理明显正确的情况
+  static String _simpleLemmatize(String word) {
+    // 检查是否不应该被还原
+    if (_doNotLemmatize.contains(word)) {
+      return word;
     }
     
     // 检查不规则动词
-    if (_irregularVerbs.containsKey(lowercaseWord)) {
-      return _irregularVerbs[lowercaseWord]!;
+    if (_safeIrregularVerbs.containsKey(word)) {
+      return _safeIrregularVerbs[word]!;
     }
     
     // 检查不规则名词
-    if (_irregularNouns.containsKey(lowercaseWord)) {
-      return _irregularNouns[lowercaseWord]!;
+    if (_safeIrregularNouns.containsKey(word)) {
+      return _safeIrregularNouns[word]!;
     }
     
-    // 检查特殊的ing形式单词
-    if (_specialIngForms.containsKey(lowercaseWord)) {
-      return _specialIngForms[lowercaseWord]!;
-    }
-    
-    // 处理常见的规则后缀
-    if (lowercaseWord.endsWith('s') && !lowercaseWord.endsWith('ss') && !lowercaseWord.endsWith('ous') && !lowercaseWord.endsWith('ious')) {
-      // 可能是复数形式或第三人称单数，但排除以ous/ious结尾的形容词
-      return lowercaseWord.substring(0, lowercaseWord.length - 1);
-    } else if (lowercaseWord.endsWith('es') && lowercaseWord.length > 3 && !lowercaseWord.endsWith('oes')) {
-      // 处理以es结尾的复数，但排除does, goes等
-      return lowercaseWord.substring(0, lowercaseWord.length - 2);
-    } else if (lowercaseWord.endsWith('ies') && lowercaseWord.length > 3) {
-      // 处理以y结尾变为ies的复数
-      return lowercaseWord.substring(0, lowercaseWord.length - 3) + 'y';
-    } else if (lowercaseWord.endsWith('ed') && lowercaseWord.length > 3) {
-      // 处理过去式，但需要检查是否是形容词
-      
-      // 检查是否是常见的以ed结尾的形容词
-      // 这里可以添加更多的启发式规则来判断
-      if (lowercaseWord.endsWith('ated') || 
-          lowercaseWord.endsWith('ized') || 
-          lowercaseWord.endsWith('ised') ||
-          lowercaseWord.startsWith('un') && lowercaseWord.length > 5) {
-        // 可能是形容词，保持原样
-        return lowercaseWord;
+    // 简单的规则复数处理
+    if (word.length > 3) {
+      // 处理明显的复数
+      if (word.endsWith('ies') && !word.endsWith('ries') && !word.endsWith('ties')) {
+        return word.substring(0, word.length - 3) + 'y';
       }
       
-      if (lowercaseWord.endsWith('ied')) {
-        return lowercaseWord.substring(0, lowercaseWord.length - 3) + 'y';
-      } else if (lowercaseWord.endsWith('eed')) {
-        return lowercaseWord.substring(0, lowercaseWord.length - 1);
-      } else {
-        return lowercaseWord.substring(0, lowercaseWord.length - 2);
-      }
-    } else if (lowercaseWord.endsWith('ing') && lowercaseWord.length > 4) {
-      // 处理现在分词
-      final stem = lowercaseWord.substring(0, lowercaseWord.length - 3);
-      
-      if (lowercaseWord.length > 5 && _isDoubleConsonant(lowercaseWord.substring(lowercaseWord.length - 5, lowercaseWord.length - 3))) {
-        // 双写辅音字母的情况，如running -> run
-        return lowercaseWord.substring(0, lowercaseWord.length - 4);
-      } else if (lowercaseWord.endsWith('ying')) {
-        // 以y结尾的情况，如flying -> fly
-        return lowercaseWord.substring(0, lowercaseWord.length - 4) + 'y';
-      } else if (stem.endsWith('l') && !stem.endsWith('ll')) {
-        // 处理以l结尾的词，如coddling -> coddle
-        return stem + 'le';
-      } else if (stem.endsWith('e')) {
-        // 如果词干已经以e结尾，不需要添加e
-        return stem;
-      } else if (lowercaseWord.endsWith('nting')) {
-        // 处理特殊情况，如punting -> punt
-        return stem;
-      } else {
-        // 大多数情况下，需要添加e，如coming -> come, making -> make
-        // 但有些词不需要，如sing -> sing, bring -> bring
-        // 这里添加一些启发式规则来判断
-        final noEWords = {
-          'sing', 'bring', 'cling', 'fling', 'ring', 'spring', 'sting', 'swing', 
-          'thing', 'wing', 'king', 'hunt', 'punt', 'grant', 'want', 'plant', 'slant',
-          'print', 'sprint', 'hint', 'tint', 'list', 'twist', 'exist', 'insist',
-          'resist', 'assist', 'persist', 'consist', 'cost', 'post', 'host'
-        };
-        
-        if (noEWords.contains(stem) || stem.endsWith('nt') || stem.endsWith('st') || stem.endsWith('ft')) {
+      // 处理ed结尾的明显过去式
+      if (word.endsWith('ed') && word.length > 4) {
+        final stem = word.substring(0, word.length - 2);
+        // 只处理明显的情况
+        if (stem.endsWith('walk') || stem.endsWith('talk') || stem.endsWith('work') ||
+            stem.endsWith('play') || stem.endsWith('stay') || stem.endsWith('look')) {
           return stem;
         }
-        
-        return stem + 'e';
       }
-    } 
+      
+      // 处理ing结尾的现在分词（保守处理）
+      if (word.endsWith('ing') && word.length > 5) {
+        final stem = word.substring(0, word.length - 3);
+        // 只处理明显的情况
+        if (stem.endsWith('walk') || stem.endsWith('talk') || stem.endsWith('work') ||
+            stem.endsWith('play') || stem.endsWith('look') || stem.endsWith('help')) {
+          return stem;
+        }
+      }
+      
+      // 处理简单的s复数
+      if (word.endsWith('s') && !word.endsWith('ss') && !word.endsWith('us') && 
+          !word.endsWith('is') && word.length > 3) {
+        return word.substring(0, word.length - 1);
+      }
+    }
     
-    // 对于其他情况，直接返回原词，避免使用Porter词干提取算法过度还原
-    return lowercaseWord;
+    return word;
   }
   
-  // 检查是否是双写的辅音字母
-  static bool _isDoubleConsonant(String str) {
-    if (str.length != 2) return false;
-    final consonants = 'bcdfghjklmnpqrstvwxyz';
-    return str[0] == str[1] && consonants.contains(str[0]);
+  /// 精确模式：使用高级词形还原算法
+  static String _preciseLemmatize(String word) {
+    // 检查是否不应该被还原
+    if (_doNotLemmatize.contains(word)) {
+      return word;
+    }
+    
+    try {
+      // 尝试作为名词进行词形还原
+      final nounLemma = _precisionLemmatizer.lemma(word, POS.NOUN);
+      if (nounLemma.lemmasFound && nounLemma.lemmas.isNotEmpty) {
+        return nounLemma.lemmas.first;
+      }
+      
+      // 尝试作为动词进行词形还原
+      final verbLemma = _precisionLemmatizer.lemma(word, POS.VERB);
+      if (verbLemma.lemmasFound && verbLemma.lemmas.isNotEmpty) {
+        return verbLemma.lemmas.first;
+      }
+      
+      // 尝试作为形容词进行词形还原
+      final adjLemma = _precisionLemmatizer.lemma(word, POS.ADJ);
+      if (adjLemma.lemmasFound && adjLemma.lemmas.isNotEmpty) {
+        return adjLemma.lemmas.first;
+      }
+      
+      // 尝试作为副词进行词形还原
+      final advLemma = _precisionLemmatizer.lemma(word, POS.ADV);
+      if (advLemma.lemmasFound && advLemma.lemmas.isNotEmpty) {
+        return advLemma.lemmas.first;
+      }
+      
+    } catch (e) {
+      // 如果精确模式失败，回退到简单模式
+      return _simpleLemmatize(word);
+    }
+    
+    // 如果所有尝试都失败，返回原词
+    return word;
+  }
+  
+  /// 获取模式描述
+  static String getModeDescription(LemmatizationMode mode) {
+    switch (mode) {
+      case LemmatizationMode.off:
+        return '关闭 - 保持原词';
+      case LemmatizationMode.simple:
+        return '简单 - 处理明显变化';
+      case LemmatizationMode.precise:
+        return '精确 - 使用高级算法';
+    }
+  }
+}
+
+/// 简化的词形还原工具类，直接使用最先进的算法
+class WordLemmatizer {
+  /// 直接使用最先进的精确模式
+  static String lemmatize(String word) {
+    return ImprovedWordLemmatizer.lemmatize(word, LemmatizationMode.precise);
   }
 }  

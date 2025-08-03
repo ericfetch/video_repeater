@@ -3,7 +3,9 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  audioplayers_linux
   desktop_webview_window
+  file_selector_linux
   media_kit_video
   screen_retriever
   url_launcher_linux

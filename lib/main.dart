@@ -15,6 +15,8 @@ import 'services/config_service.dart';
 import 'services/app_services.dart';
 import 'services/download_info_service.dart';
 import 'services/dictionary_service.dart';
+import 'services/translation_service.dart';
+import 'services/bailian_translation_service.dart';
 import 'models/history_model.dart';
 import 'screens/home_screen.dart';
 import 'screens/windows_requirements_screen.dart';
@@ -119,6 +121,11 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ConfigService()),
         ChangeNotifierProvider(create: (_) => DownloadInfoService()),
         ChangeNotifierProvider(create: (_) => DictionaryService()),
+        ProxyProvider<ConfigService, TranslationService>(
+          update: (context, configService, previous) => 
+              TranslationService(configService: configService),
+        ),
+        Provider(create: (_) => BailianTranslationService()),
       ],
       child: Consumer<ConfigService>(
         builder: (context, configService, child) {

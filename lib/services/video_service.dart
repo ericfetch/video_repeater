@@ -1921,4 +1921,84 @@ class VideoService extends ChangeNotifier {
       }
     }
   }
+  
+  // 从视频中提取字幕时间段的音频
+  Future<String?> extractAudioFromSubtitle(SubtitleEntry subtitle) async {
+    if (_currentVideoPath == null || subtitle == null) {
+      debugPrint('无法提取音频：视频路径或字幕为空');
+      return null;
+    }
+
+    try {
+      // 创建音频文件存储目录
+      final appDocDir = await getApplicationDocumentsDirectory();
+      final audioDir = Directory(path.join(appDocDir.path, 'vocabulary_audio'));
+      if (!await audioDir.exists()) {
+        await audioDir.create(recursive: true);
+      }
+
+      // 生成唯一的文件名
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final fileName = '${path.basenameWithoutExtension(_currentVideoPath!)}_${subtitle.index}_$timestamp.mp3';
+      final outputPath = path.join(audioDir.path, fileName);
+
+      // 使用FFmpeg提取音频
+      // 计算起始时间和持续时间（考虑字幕偏移）
+      final startTime = subtitle.start.inMilliseconds + _subtitleTimeOffset;
+      final duration = subtitle.duration.inMilliseconds;
+      
+      // 格式化时间为FFmpeg格式 (HH:MM:SS.mmm)
+      final formattedStartTime = _formatDurationForFFmpeg(Duration(milliseconds: startTime));
+      final formattedDuration = _formatDurationForFFmpeg(Duration(milliseconds: duration));
+      
+      debugPrint('提取音频：从 $formattedStartTime 开始，持续 $formattedDuration');
+      
+      // 构建FFmpeg命令
+      final ffmpegArgs = [
+        '-y',                      // 覆盖输出文件
+        '-ss', formattedStartTime, // 起始时间
+        '-i', _currentVideoPath!,  // 输入文件
+        '-t', formattedDuration,   // 持续时间
+        '-vn',                     // 不包含视频
+        '-acodec', 'libmp3lame',   // 使用MP3编码器
+        '-ar', '44100',            // 采样率
+        '-ab', '192k',             // 比特率
+        '-f', 'mp3',               // 输出格式
+        outputPath                 // 输出文件
+      ];
+      
+      debugPrint('FFmpeg命令: ffmpeg ${ffmpegArgs.join(' ')}');
+      
+      // 执行FFmpeg命令
+      final process = await Process.start('ffmpeg', ffmpegArgs);
+      
+      // 监听输出
+      process.stderr.transform(utf8.decoder).listen((data) {
+        debugPrint('FFmpeg: $data');
+      });
+      
+      // 等待进程完成
+      final exitCode = await process.exitCode;
+      
+      if (exitCode == 0) {
+        debugPrint('音频提取成功: $outputPath');
+        return outputPath;
+      } else {
+        debugPrint('音频提取失败，退出代码: $exitCode');
+        return null;
+      }
+    } catch (e) {
+      debugPrint('提取音频时出错: $e');
+      return null;
+    }
+  }
+  
+  // 格式化时间为FFmpeg格式 (HH:MM:SS.mmm)
+  String _formatDurationForFFmpeg(Duration duration) {
+    final hours = duration.inHours.toString().padLeft(2, '0');
+    final minutes = (duration.inMinutes % 60).toString().padLeft(2, '0');
+    final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
+    final milliseconds = (duration.inMilliseconds % 1000).toString().padLeft(3, '0');
+    return '$hours:$minutes:$seconds.$milliseconds';
+  }
 } 

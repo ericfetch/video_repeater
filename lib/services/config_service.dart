@@ -27,6 +27,11 @@ class ConfigService extends ChangeNotifier {
     'youtubeDownloadPath': '', // YouTube视频下载路径，空表示使用临时目录
     'youtubeVideoQuality': '480p', // YouTube视频质量
     
+    // Google Cloud Translation API设置
+    'googleTranslateApiKey': '', // Google Cloud Translation API密钥
+    'googleProjectId': '', // Google Cloud项目ID
+    'translateTargetLanguage': 'zh-CN', // 翻译目标语言，默认为中文简体
+    
     // 界面设置
     'darkMode': false,
   };
@@ -74,6 +79,15 @@ class ConfigService extends ChangeNotifier {
   
   // 获取YouTube视频质量
   String get youtubeVideoQuality => _config['youtubeVideoQuality'] ?? '480p';
+  
+  // 获取Google Cloud Translation API密钥
+  String? get googleTranslateApiKey => _config['googleTranslateApiKey'];
+  
+  // 获取Google Cloud项目ID
+  String? get googleProjectId => _config['googleProjectId'];
+  
+  // 获取翻译目标语言
+  String get translateTargetLanguage => _config['translateTargetLanguage'] ?? 'zh-CN';
   
   // 获取暗黑模式
   bool get darkMode => _config['darkMode'];
@@ -194,6 +208,27 @@ class ConfigService extends ChangeNotifier {
   // 更新YouTube视频质量
   Future<void> setYouTubeVideoQuality(String quality) async {
     _config['youtubeVideoQuality'] = quality;
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新Google Cloud Translation API密钥
+  Future<void> updateGoogleTranslateApiKey(String apiKey) async {
+    _config['googleTranslateApiKey'] = apiKey;
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新Google Cloud项目ID
+  Future<void> updateGoogleProjectId(String projectId) async {
+    _config['googleProjectId'] = projectId;
+    await saveConfig();
+    notifyListeners();
+  }
+  
+  // 更新翻译目标语言
+  Future<void> updateTranslateTargetLanguage(String languageCode) async {
+    _config['translateTargetLanguage'] = languageCode;
     await saveConfig();
     notifyListeners();
   }

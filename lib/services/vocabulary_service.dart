@@ -5,8 +5,13 @@ import 'package:hive/hive.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/vocabulary_model.dart';
+import '../models/subtitle_model.dart';
 import '../utils/word_lemmatizer.dart';
+import '../models/dictionary_word.dart';
+import '../services/dictionary_service.dart';
 import 'package:path/path.dart' as path;
+import 'package:provider/provider.dart';
+import '../main.dart'; // 导入main.dart以获取navigatorKey
 
 // 定义VocabularyWord适配器
 class VocabularyWordAdapter extends TypeAdapter<VocabularyWord> {
@@ -25,13 +30,15 @@ class VocabularyWordAdapter extends TypeAdapter<VocabularyWord> {
       context: fields[1] as String,
       addedTime: fields[2] as DateTime,
       videoName: fields[3] as String,
+      audioPath: fields.containsKey(4) ? fields[4] as String? : null,
+      rememberedCount: fields.containsKey(5) ? fields[5] as int : 0,
     );
   }
 
   @override
   void write(BinaryWriter writer, VocabularyWord obj) {
     writer
-      ..writeByte(4)
+      ..writeByte(6)
       ..writeByte(0)
       ..write(obj.word)
       ..writeByte(1)
@@ -39,7 +46,11 @@ class VocabularyWordAdapter extends TypeAdapter<VocabularyWord> {
       ..writeByte(2)
       ..write(obj.addedTime)
       ..writeByte(3)
-      ..write(obj.videoName);
+      ..write(obj.videoName)
+      ..writeByte(4)
+      ..write(obj.audioPath)
+      ..writeByte(5)
+      ..write(obj.rememberedCount);
   }
 
   @override
@@ -125,6 +136,11 @@ class VocabularyService extends ChangeNotifier {
       return 0;
     }
     return _vocabularyLists[_currentVideoName]!.words.length;
+  }
+  
+  // 检查生词本是否已加载
+  bool isVocabularyLoaded() {
+    return _isInitialized;
   }
   
   // 初始化Hive数据库
@@ -456,7 +472,7 @@ class VocabularyService extends ChangeNotifier {
   }
   
   // 添加单词到生词本
-  Future<void> addWord(String videoName, String word, String context) async {
+  Future<void> addWord(String videoName, String word, String context, {String? audioPath}) async {
     if (!_isInitialized) await initialize();
     
     try {
@@ -481,6 +497,7 @@ class VocabularyService extends ChangeNotifier {
         context: context,
         addedTime: DateTime.now(),
         videoName: videoName,
+        audioPath: audioPath,
       );
       
       // 检查单词是否已存在
@@ -635,7 +652,7 @@ class VocabularyService extends ChangeNotifier {
   }
   
   // 添加单词到生词本 (简化版)
-  Future<void> addWordToVocabulary(String word, String context, String? videoPath) async {
+  Future<void> addWordToVocabulary(String word, String context, String? videoPath, {String? audioPath, SubtitleEntry? currentSubtitle}) async {
     if (word.isEmpty) return;
     
     // 从视频路径中提取视频名称，如果路径为空则使用"未知视频"
@@ -648,7 +665,7 @@ class VocabularyService extends ChangeNotifier {
     }
     
     // 添加单词
-    await addWord(videoName, word, context);
+    await addWord(videoName, word, context, audioPath: audioPath);
   }
   
   // 清空所有生词本
@@ -700,11 +717,6 @@ class VocabularyService extends ChangeNotifier {
       debugPrintStack(stackTrace: StackTrace.current);
       throw Exception('清空生词本失败: $e');
     }
-  }
-  
-  // 检查生词本数据是否已加载
-  bool isVocabularyLoaded() {
-    return _isInitialized && _vocabularyLists.isNotEmpty;
   }
   
   // 获取生词本总数
@@ -1067,6 +1079,108 @@ class VocabularyService extends ChangeNotifier {
         'words': 0,
         'error': e.toString(),
       };
+    }
+  }
+  
+  // 更新单词的记忆次数
+  Future<void> increaseRememberedCount(String videoName, String word) async {
+    if (!_isInitialized) await initialize();
+    
+    try {
+      debugPrint('增加单词"$word"的记忆次数');
+      
+      if (!_vocabularyLists.containsKey(videoName)) {
+        debugPrint('生词本不存在: $videoName');
+        return;
+      }
+      
+      // 从生词本中获取单词
+      final existingWords = _vocabularyLists[videoName]!.words;
+      final wordIndex = existingWords.indexWhere((w) => w.word == word);
+      
+      if (wordIndex < 0) {
+        debugPrint('单词"$word"不存在于生词本"$videoName"中');
+        return;
+      }
+      
+      // 获取当前单词
+      final currentWord = existingWords[wordIndex];
+      
+      // 创建更新后的单词（记忆次数+1）
+      final updatedWord = currentWord.copyWithIncreasedRememberedCount();
+      
+      // 更新内存中的单词
+      final updatedWords = List<VocabularyWord>.from(existingWords);
+      updatedWords[wordIndex] = updatedWord;
+      
+      _vocabularyLists[videoName] = VocabularyList(
+        videoName: videoName,
+        words: updatedWords,
+      );
+      
+      // 保存到Hive
+      await _vocabularyBox.put(word, updatedWord);
+      await saveVocabularyList(videoName);
+      
+      debugPrint('单词"$word"的记忆次数已更新为: ${updatedWord.rememberedCount}');
+      
+      // 清除缓存
+      _invalidateWordsCache();
+      
+      notifyListeners();
+      
+      // 如果记忆次数达到阈值，标记为熟知
+      if (updatedWord.rememberedCount >= 10) {
+        await markWordAsMastered(videoName, word);
+      }
+    } catch (e) {
+      debugPrint('更新单词记忆次数失败: $e');
+      debugPrintStack(stackTrace: StackTrace.current);
+    }
+  }
+  
+  // 将单词标记为熟知（添加到词典并从生词本中删除）
+  Future<void> markWordAsMastered(String videoName, String word) async {
+    try {
+      debugPrint('将单词"$word"标记为熟知');
+      
+      // 获取词典服务
+      final dictionaryService = Provider.of<DictionaryService>(navigatorKey.currentContext!, listen: false);
+      
+      // 检查词典中是否已存在该单词
+      final existingWord = dictionaryService.getWord(word);
+      
+      if (existingWord == null) {
+        // 如果词典中不存在，则添加
+        final dictionaryWord = DictionaryWord(
+          word: word,
+          definition: '用户标记为熟知',
+          isFamiliar: true,
+        );
+        
+        await dictionaryService.addWord(dictionaryWord);
+        debugPrint('已将单词"$word"添加到词典并标记为熟知');
+      } else if (!existingWord.isFamiliar) {
+        // 如果词典中存在但未标记为熟知，则更新
+        final updatedWord = DictionaryWord(
+          word: existingWord.word,
+          definition: existingWord.definition,
+          phonetic: existingWord.phonetic,
+          partOfSpeech: existingWord.partOfSpeech,
+          cefr: existingWord.cefr,
+          isFamiliar: true,
+        );
+        
+        await dictionaryService.updateWord(updatedWord);
+        debugPrint('已将词典中的单词"$word"标记为熟知');
+      }
+      
+      // 从生词本中删除
+      await removeWord(videoName, word);
+      debugPrint('已从生词本中删除单词"$word"');
+    } catch (e) {
+      debugPrint('标记单词为熟知失败: $e');
+      debugPrintStack(stackTrace: StackTrace.current);
     }
   }
 } 

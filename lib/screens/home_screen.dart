@@ -26,6 +26,7 @@ import '../screens/vocabulary_recovery_screen.dart';
 import '../screens/windows_requirements_screen.dart';
 import '../screens/dictionary_management_screen.dart';
 import '../screens/subtitle_analysis_screen.dart';
+import '../screens/subtitle_article_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -752,6 +753,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         _navigateToSubtitleAnalysisScreen(context);
                                       },
                                     ),
+                                    // 字幕文章按钮
+                                    _SafeIconButton(
+                                      icon: const Icon(Icons.article, color: Colors.white),
+                                      tooltip: '字幕文章阅读',
+                                      onPressed: () {
+                                        _navigateToSubtitleArticleScreen(context);
+                                      },
+                                    ),
                                      // 词典管理按钮
                                     _SafeIconButton(
                                       icon: const Icon(Icons.menu_book, color: Colors.white),
@@ -1375,6 +1384,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => SubtitleAnalysisScreen(
+          videoService: Provider.of<VideoService>(context, listen: false),
+          vocabularyService: Provider.of<VocabularyService>(context, listen: false),
+          dictionaryService: Provider.of<DictionaryService>(context, listen: false),
+        ),
+      ),
+    );
+  }
+  
+  // 导航到字幕文章页面
+  void _navigateToSubtitleArticleScreen(BuildContext context) {
+    // 禁用自动焦点
+    setState(() {
+      _shouldAutoFocus = false;
+    });
+    
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => SubtitleArticleScreen(
           videoService: Provider.of<VideoService>(context, listen: false),
           vocabularyService: Provider.of<VocabularyService>(context, listen: false),
           dictionaryService: Provider.of<DictionaryService>(context, listen: false),

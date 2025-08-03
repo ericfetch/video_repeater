@@ -21,13 +21,15 @@ class VocabularyWordAdapter extends TypeAdapter<VocabularyWord> {
       context: fields[1] as String,
       addedTime: fields[2] as DateTime,
       videoName: fields[3] as String,
+      audioPath: fields[4] as String?,
+      rememberedCount: fields[5] as int,
     );
   }
 
   @override
   void write(BinaryWriter writer, VocabularyWord obj) {
     writer
-      ..writeByte(4)
+      ..writeByte(6)
       ..writeByte(0)
       ..write(obj.word)
       ..writeByte(1)
@@ -35,7 +37,11 @@ class VocabularyWordAdapter extends TypeAdapter<VocabularyWord> {
       ..writeByte(2)
       ..write(obj.addedTime)
       ..writeByte(3)
-      ..write(obj.videoName);
+      ..write(obj.videoName)
+      ..writeByte(4)
+      ..write(obj.audioPath)
+      ..writeByte(5)
+      ..write(obj.rememberedCount);
   }
 
   @override

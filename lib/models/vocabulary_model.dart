@@ -16,12 +16,32 @@ class VocabularyWord {
   @HiveField(3)
   final String videoName;   // 所属视频名称
   
+  @HiveField(4)
+  final String? audioPath;  // 音频文件路径
+  
+  @HiveField(5)
+  final int rememberedCount; // 记住的次数
+  
   VocabularyWord({
     required this.word,
     required this.context,
     required this.addedTime,
     required this.videoName,
+    this.audioPath,
+    this.rememberedCount = 0,
   });
+  
+  // 创建一个记住次数+1的新实例
+  VocabularyWord copyWithIncreasedRememberedCount() {
+    return VocabularyWord(
+      word: word,
+      context: context,
+      addedTime: addedTime,
+      videoName: videoName,
+      audioPath: audioPath,
+      rememberedCount: rememberedCount + 1,
+    );
+  }
   
   // 从JSON转换
   factory VocabularyWord.fromJson(Map<String, dynamic> json) {
@@ -30,6 +50,8 @@ class VocabularyWord {
       context: json['context'] as String,
       addedTime: DateTime.parse(json['addedTime'] as String),
       videoName: json['videoName'] as String? ?? '',
+      audioPath: json['audioPath'] as String?,
+      rememberedCount: json['rememberedCount'] as int? ?? 0,
     );
   }
   
@@ -40,6 +62,8 @@ class VocabularyWord {
       'context': context,
       'addedTime': addedTime.toIso8601String(),
       'videoName': videoName,
+      'audioPath': audioPath,
+      'rememberedCount': rememberedCount,
     };
   }
 }

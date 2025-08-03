@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/video_service.dart';
 import '../services/vocabulary_service.dart';
 import '../services/message_service.dart';
 import '../services/config_service.dart';
+import '../services/bailian_translation_service.dart';
 import '../models/subtitle_model.dart';
 import 'subtitle_selection_area.dart';
 import 'package:path/path.dart' as path;
@@ -29,6 +32,19 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
   bool _isSubtitleBlurred = false;
   // 用于保存上次的音量
   double _lastVolume = 100;
+  // 是否启用音量增强
+  bool _isVolumeBoostEnabled = false;
+  // 音量增强系数
+  double _volumeBoostFactor = 2.0;
+  
+  // 翻译服务
+  final BailianTranslationService _translationService = BailianTranslationService();
+  
+  // 翻译相关状态
+  bool _isTranslating = false;
+  String? _translatedText;
+  String? _lastTranslatedSubtitle;
+  OverlayEntry? _translationOverlay;
   
   // 获取字幕模糊状态
   bool get isSubtitleBlurred => _isSubtitleBlurred;
@@ -73,7 +89,14 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
       player.stream.volume.listen((volume) {
         if (mounted) {
           setState(() {
-            _currentVolume = volume;
+            // 如果启用了音量增强，需要将实际音量除以增强系数
+            if (_isVolumeBoostEnabled && volume > 0) {
+              _currentVolume = volume / _volumeBoostFactor;
+              // 确保不超过最大值
+              _currentVolume = _currentVolume > 100 ? 100 : _currentVolume;
+            } else {
+              _currentVolume = volume;
+            }
           });
         }
       });
@@ -102,8 +125,15 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
     return text;
   }
   
+  @override
+  void dispose() {
+    // 清理翻译浮动弹出框
+    _hideTranslationOverlay();
+    super.dispose();
+  }
+  
   // 添加单词到生词本
-  void _addToVocabulary(BuildContext context, String word) {
+  Future<void> _addToVocabulary(BuildContext context, String word) async {
     if (word.isEmpty) return;
     
     // 获取视频服务
@@ -116,18 +146,194 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
     // 获取生词本服务
     final vocabularyService = Provider.of<VocabularyService>(context, listen: false);
     
-    // 添加单词到生词本
-    vocabularyService.addWordToVocabulary(
+    // 获取消息服务
+    final messageService = Provider.of<MessageService>(context, listen: false);
+    
+    // 提取当前字幕时间段的音频
+    messageService.showMessage('正在提取音频...');
+    String? audioPath;
+    try {
+      audioPath = await videoService.extractAudioFromSubtitle(currentSubtitle);
+      if (audioPath != null) {
+        messageService.showSuccess('音频提取成功');
+      } else {
+        messageService.showError('音频提取失败');
+      }
+    } catch (e) {
+      debugPrint('音频提取错误: $e');
+      messageService.showError('音频提取错误: $e');
+    }
+    
+    // 添加单词到生词本，包含音频路径
+    await vocabularyService.addWordToVocabulary(
       word, 
       _cleanSubtitleText(currentSubtitle.text),
       videoService.currentVideoPath,
+      audioPath: audioPath,
+      currentSubtitle: currentSubtitle,
     );
     
-    // 使用通用消息服务显示提示
-    final messageService = Provider.of<MessageService>(context, listen: false);
-    messageService.showSuccess('已添加 "$word" 到生词本');
+    // 显示提示
+    messageService.showSuccess('已添加 "$word" 到生词本${audioPath != null ? " (带音频)" : ""}');
   }
   
+  // 翻译当前字幕
+  Future<void> _translateCurrentSubtitle(BuildContext context) async {
+    final videoService = widget.videoService ?? Provider.of<VideoService>(context, listen: false);
+    final currentSubtitle = videoService.currentSubtitle;
+    
+    if (currentSubtitle == null || currentSubtitle.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('当前没有字幕可以翻译'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    
+    final subtitleText = _cleanSubtitleText(currentSubtitle.text);
+    
+    // 如果是同一条字幕且已有翻译，直接显示
+    if (_lastTranslatedSubtitle == subtitleText && _translatedText != null) {
+      _showTranslationOverlay(context, subtitleText, _translatedText!);
+      return;
+    }
+    
+    // 开始翻译
+    setState(() {
+      _isTranslating = true;
+    });
+    
+    try {
+      final translation = await _translationService.translateText(subtitleText);
+      
+      setState(() {
+        _translatedText = translation;
+        _lastTranslatedSubtitle = subtitleText;
+        _isTranslating = false;
+      });
+      
+      _showTranslationOverlay(context, subtitleText, translation);
+    } catch (e) {
+      setState(() {
+        _isTranslating = false;
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('翻译失败: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+  
+  // 显示翻译浮动弹出框
+  void _showTranslationOverlay(BuildContext context, String originalText, String translatedText) {
+    // 关闭之前的overlay
+    _hideTranslationOverlay();
+    
+    final overlay = Overlay.of(context);
+    final renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+    
+    final size = renderBox.size;
+    final offset = renderBox.localToGlobal(Offset.zero);
+    
+        // 让翻译tooltip和字幕区域等宽
+    final subtitleLeft = offset.dx + 10; // 字幕容器左边位置（向左移动10像素）
+    final subtitleTop = offset.dy + size.height * 0.3; // 字幕文本大概的垂直位置
+    final subtitleWidth = size.width - 40; // 字幕容器宽度（减去左右间距）
+    
+    _translationOverlay = OverlayEntry(
+      builder: (context) => Positioned(
+        left: subtitleLeft,
+        top: subtitleTop - 54, // 紧贴字幕文本上方（向上移动4像素）
+        width: subtitleWidth,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+            color: const Color(0xFF8B4513), // 深棕色纯色背景
+            border: Border.all(
+              color: const Color(0xFFE6A85C), // 比背景浅一点的内边框
+              width: 1,
+            ),
+            boxShadow: const [
+              // 外阴影
+              BoxShadow(
+                color: Colors.black26,
+                offset: Offset(0, 2),
+                blurRadius: 6,
+                spreadRadius: 0,
+              ),
+            ],
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () {
+                Clipboard.setData(ClipboardData(text: translatedText));
+                _hideTranslationOverlay();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('翻译已复制'),
+                    backgroundColor: Colors.green,
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                width: double.infinity,
+                child: Text(
+                  translatedText,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Colors.white,
+                    height: 1.4,
+                  ),
+                  textAlign: TextAlign.left, // 左对齐
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    
+    overlay.insert(_translationOverlay!);
+    
+    // 3秒后自动隐藏
+    Timer(const Duration(seconds: 3), () {
+      _hideTranslationOverlay();
+    });
+  }
+  
+  // 隐藏翻译浮动弹出框
+  void _hideTranslationOverlay() {
+    _translationOverlay?.remove();
+    _translationOverlay = null;
+  }
+  
+  // 获取显示的音量值（考虑音量增强）
+  String getDisplayVolume() {
+    if (_currentVolume <= 0) return '0%';
+    
+    if (_isVolumeBoostEnabled) {
+      // 显示增强后的音量值
+      double boostedVolume = _currentVolume * _volumeBoostFactor;
+      // 限制最大显示值为200%
+      boostedVolume = boostedVolume > 200 ? 200 : boostedVolume;
+      return '${boostedVolume.toInt()}%';
+    } else {
+      return '${_currentVolume.toInt()}%';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final videoService = widget.videoService ?? Provider.of<VideoService>(context);
@@ -274,13 +480,25 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                               setState(() {
                                 _currentVolume = volumeToRestore;
                               });
+                              
+                              // 如果启用了音量增强，将音量值乘以增强系数
+                              double effectiveVolume = _isVolumeBoostEnabled 
+                                  ? volumeToRestore * _volumeBoostFactor 
+                                  : volumeToRestore;
+                                  
                               if (videoService.isYouTubeVideo) {
-                                videoService.setVolume(volumeToRestore);
+                                videoService.setVolume(effectiveVolume);
                               } else {
-                                player.setVolume(volumeToRestore);
+                                player.setVolume(effectiveVolume);
                               }
                               final messageService = Provider.of<MessageService>(context, listen: false);
-                              messageService.showMessage('音量: ${volumeToRestore.toInt()}%');
+                              
+                              // 显示的音量值考虑增强效果
+                              String volumeDisplay = _isVolumeBoostEnabled 
+                                  ? '${(volumeToRestore * _volumeBoostFactor).toInt()}%' 
+                                  : '${volumeToRestore.toInt()}%';
+                                  
+                              messageService.showMessage('音量: $volumeDisplay');
                             }
                           },
                           child: Padding(
@@ -292,6 +510,91 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                             ),
                           ),
                         ),
+                        
+                        // 音量增强按钮
+                        GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _isVolumeBoostEnabled = !_isVolumeBoostEnabled;
+                              
+                              // 应用当前音量，以更新实际音量值
+                              double effectiveVolume = _isVolumeBoostEnabled 
+                                  ? _currentVolume * _volumeBoostFactor 
+                                  : _currentVolume;
+                                  
+                              if (videoService.isYouTubeVideo) {
+                                videoService.setVolume(effectiveVolume);
+                              } else {
+                                player.setVolume(effectiveVolume);
+                              }
+                            });
+                            
+                            final messageService = Provider.of<MessageService>(context, listen: false);
+                            messageService.showMessage(
+                              _isVolumeBoostEnabled 
+                                ? '音量增强: 已开启 (x${_volumeBoostFactor.toStringAsFixed(1)})' 
+                                : '音量增强: 已关闭'
+                            );
+                          },
+                          onLongPress: () {
+                            // 显示音量增强系数选择菜单
+                            final List<double> boostOptions = [1.5, 2.0, 3.0, 4.0, 5.0];
+                            
+                            showDialog(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text('选择音量增强系数'),
+                                content: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: boostOptions.map((factor) {
+                                    return ListTile(
+                                      title: Text('${factor.toStringAsFixed(1)}x'),
+                                      selected: _volumeBoostFactor == factor,
+                                      onTap: () {
+                                        setState(() {
+                                          _volumeBoostFactor = factor;
+                                          
+                                          // 如果音量增强已启用，则应用新的增强系数
+                                          if (_isVolumeBoostEnabled) {
+                                            double effectiveVolume = _currentVolume * _volumeBoostFactor;
+                                            if (videoService.isYouTubeVideo) {
+                                              videoService.setVolume(effectiveVolume);
+                                            } else {
+                                              player.setVolume(effectiveVolume);
+                                            }
+                                          }
+                                        });
+                                        
+                                        final messageService = Provider.of<MessageService>(context, listen: false);
+                                        messageService.showMessage('音量增强系数: ${factor.toStringAsFixed(1)}x');
+                                        
+                                        Navigator.pop(context);
+                                      },
+                                    );
+                                  }).toList(),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(context),
+                                    child: const Text('取消'),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                          child: Tooltip(
+                            message: '音量增强 (长按设置系数)',
+                            child: Padding(
+                              padding: const EdgeInsets.all(4.0),
+                              child: Icon(
+                                _isVolumeBoostEnabled ? Icons.volume_up_rounded : Icons.volume_up_outlined,
+                                color: _isVolumeBoostEnabled ? Colors.orange : Colors.white,
+                                size: 20,
+                              ),
+                            ),
+                          ),
+                        ),
+                        
                         SizedBox(
                           width: 100,
                           child: Slider(
@@ -299,7 +602,7 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                             min: 0,
                             max: 100,
                             divisions: 20,
-                            activeColor: Colors.blue,
+                            activeColor: _isVolumeBoostEnabled ? Colors.orange : Colors.blue,
                             inactiveColor: Colors.grey[700],
                             onChanged: (value) {
                               setState(() {
@@ -308,12 +611,32 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                                   _lastVolume = value; // 更新上次音量
                                 }
                               });
+                              
+                              // 如果启用了音量增强，将音量值乘以增强系数
+                              double effectiveVolume = _isVolumeBoostEnabled 
+                                  ? value * _volumeBoostFactor 
+                                  : value;
+                                  
                               if (videoService.isYouTubeVideo) {
-                                videoService.setVolume(value);
+                                videoService.setVolume(effectiveVolume);
                               } else {
-                                player.setVolume(value);
+                                player.setVolume(effectiveVolume);
                               }
                             },
+                          ),
+                        ),
+                        
+                        // 显示当前音量值
+                        Container(
+                          width: 45,
+                          alignment: Alignment.center,
+                          child: Text(
+                            getDisplayVolume(),
+                            style: TextStyle(
+                              color: _isVolumeBoostEnabled ? Colors.orange : Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
                       ],
@@ -629,6 +952,30 @@ class SubtitleControlWidgetState extends State<SubtitleControlWidget> {
                                     ),
                               ),
                             ),
+                            
+                            // 翻译按钮
+                            if (currentSubtitle != null && currentSubtitle.text.trim().isNotEmpty)
+                              Container(
+                                margin: const EdgeInsets.only(left: 8),
+                                child: IconButton(
+                                  icon: _isTranslating
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                                        ),
+                                      )
+                                    : const Icon(Icons.translate, size: 20),
+                                  tooltip: '翻译当前字幕',
+                                  onPressed: _isTranslating 
+                                    ? null 
+                                    : () => _translateCurrentSubtitle(context),
+                                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                                  padding: EdgeInsets.zero,
+                              ),
+                            ),
                           ],
                         ),
                       );
@@ -703,3 +1050,5 @@ class CustomTrackShape extends RoundedRectSliderTrackShape {
     return Rect.fromLTWH(trackLeft, trackTop, trackWidth, trackHeight);
   }
 } 
+
+ 
