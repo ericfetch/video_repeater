@@ -1,32 +1,39 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:media_kit/media_kit.dart';
-import 'dart:io';
 import 'dart:async';
-import 'package:flutter/services.dart';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
+
 import '../services/video_service.dart';
-import '../services/history_service.dart';
 import '../services/vocabulary_service.dart';
-import '../services/message_service.dart';
+import '../services/history_service.dart';
 import '../services/config_service.dart';
+import '../services/message_service.dart';
 import '../services/app_services.dart';
 import '../services/download_info_service.dart';
 import '../services/dictionary_service.dart';
+import '../services/daily_video_service.dart';
 import '../models/history_model.dart';
 import '../widgets/video_player_widget.dart';
 import '../widgets/subtitle_control_widget.dart';
 import '../widgets/history_list_widget.dart';
 import '../widgets/vocabulary_list_widget.dart';
 import '../widgets/download_info_panel.dart';
+import '../widgets/daily_video_dashboard_widget.dart';
 import '../screens/config_screen.dart';
 import '../screens/youtube_video_screen.dart';
+import '../screens/vocabulary_screen.dart';
+import '../screens/history_screen.dart';
+import '../screens/subtitle_analysis_screen.dart';
+import '../screens/dictionary_management_screen.dart';
 import '../screens/vocabulary_recovery_screen.dart';
 import '../screens/windows_requirements_screen.dart';
-import '../screens/dictionary_management_screen.dart';
-import '../screens/subtitle_analysis_screen.dart';
 import '../screens/subtitle_article_screen.dart';
+import '../widgets/daily_video_list_widget.dart'; // Added import for DailyVideoListWidget
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -46,6 +53,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   
   // 侧边栏显示内容
   bool _showVocabulary = false; // true表示显示生词本，false表示显示历史记录
+  
+  // 左侧今日视频列表显示状态
+  bool _showDailyVideoList = true;
   
   late FocusNode _focusNode;
   
@@ -83,6 +93,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _vocabularyService = Provider.of<VocabularyService>(context, listen: false);
     _videoService = Provider.of<VideoService>(context, listen: false);
     _messageService = Provider.of<MessageService>(context, listen: false);
+    
+    // 从配置中加载今日视频列表显示状态
+    final configService = Provider.of<ConfigService>(context, listen: false);
+    _showDailyVideoList = configService.showDailyVideoList;
   }
   
   @override
@@ -540,29 +554,62 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     onEnter: _handleMouseMove,
                     child: Stack(
                       children: [
-                        // 主内容
+                        // 主视频播放区域（全屏）
                         Column(
                           children: [
-                            // 视频播放区域
+                            // 视频播放器
                             Expanded(
-                              child: Column(
-                                children: [
-                                  // 视频播放器
-                                  Expanded(
-                                    child: VideoPlayerWidget(
-                                      videoService: videoService,
-                                    ),
-                                  ),
-                                  
-                                  // 字幕控制区域
-                                  SubtitleControlWidget(
-                                    key: _subtitleControlKey,
-                                  ),
-                                ],
+                              child: VideoPlayerWidget(
+                                videoService: videoService,
                               ),
+                            ),
+                            
+                            // 字幕控制区域
+                            SubtitleControlWidget(
+                              key: _subtitleControlKey,
                             ),
                           ],
                         ),
+                        
+                        // 浮动的今日视频列表
+                        if (_showDailyVideoList)
+                          Positioned.fill(
+                            child: GestureDetector(
+                              onTap: _toggleDailyVideoList, // 点击空白区域关闭
+                              child: Container(
+                                color: Colors.black.withOpacity(0.3), // 半透明遮罩
+                                child: GestureDetector(
+                                  onTap: () {}, // 阻止事件冒泡到父级
+                                  child: Container(
+                                    margin: const EdgeInsets.only(
+                                      top: 80, // 给AppBar和触发区域留出空间
+                                      left: 16,
+                                      right: 16,
+                                      bottom: 16,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(12),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.4),
+                                          blurRadius: 20,
+                                          offset: const Offset(4, 0),
+                                          spreadRadius: 2,
+                                        ),
+                                      ],
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: DailyVideoDashboardWidget(
+                                        onHide: _toggleDailyVideoList,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
                         
                         // 顶部触发区指示条，只在AppBar隐藏时显示
                         if (!_showAppBar)
@@ -635,10 +682,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                       padding: const EdgeInsets.symmetric(horizontal: 16),
                                       child: Row(
                                         children: [
-                                          const Icon(
-                                            Icons.video_library,
-                                            color: Colors.blue,
-                                            size: 24,
+                                          _SafeIconButton(
+                                            icon: Icon(
+                                              _showDailyVideoList ? Icons.video_library : Icons.video_library_outlined,
+                                              color: _showDailyVideoList ? Colors.blue : Colors.grey,
+                                              size: 24,
+                                            ),
+                                            tooltip: _showDailyVideoList ? '隐藏视频列表' : '显示视频列表',
+                                            onPressed: _toggleDailyVideoList,
                                           ),
                                           const SizedBox(width: 8),
                                           Container(
@@ -1258,6 +1309,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         debugPrint('强制恢复焦点出错: $e');
       }
     }
+  }
+  
+  // 切换今日视频列表显示状态并保存配置
+  void _toggleDailyVideoList() {
+    setState(() {
+      _showDailyVideoList = !_showDailyVideoList;
+    });
+    
+    // 显示状态提示
+    _showSnackBar(_showDailyVideoList ? '显示今日列表' : '隐藏今日列表');
+    
+    // 保存配置
+    final configService = Provider.of<ConfigService>(context, listen: false);
+    configService.updateShowDailyVideoList(_showDailyVideoList);
   }
   
   // 构建抽屉菜单

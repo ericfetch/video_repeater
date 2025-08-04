@@ -71,7 +71,20 @@ class SubtitleAnalysisService extends ChangeNotifier {
   /// 检查是否有缓存的分析结果
   bool hasAnalysisResult(String videoPath, String? subtitlePath) {
     final key = _getVideoKey(videoPath, subtitlePath);
-    return _analysisCache.containsKey(key);
+    final hasResult = _analysisCache.containsKey(key);
+    debugPrint('hasAnalysisResult - key: $key, hasResult: $hasResult');
+    return hasResult;
+  }
+
+  /// 调试：显示当前缓存状态
+  void debugCacheStatus() {
+    debugPrint('=== 分析缓存状态 ===');
+    debugPrint('缓存数量: ${_analysisCache.length}');
+    for (final key in _analysisCache.keys) {
+      debugPrint('缓存key: $key');
+    }
+    debugPrint('正在分析: $_analyzingVideos');
+    debugPrint('================');
   }
 
   /// 获取缓存的分析结果
@@ -253,9 +266,260 @@ class SubtitleAnalysisService extends ChangeNotifier {
     };
   }
 
+  /// 汇总多个视频的分析结果
+  MultiVideoAnalysisResult? getMultiVideoAnalysis(List<String> videoKeys) {
+    final validResults = <SubtitleAnalysisResult>[];
+    
+    for (final key in videoKeys) {
+      final result = _analysisCache[key];
+      if (result != null) {
+        validResults.add(result);
+      }
+    }
+    
+    if (validResults.isEmpty) return null;
+    
+    return _calculateMultiVideoStats(validResults);
+  }
+
+  /// 获取今日视频分析汇总（通过视频路径列表）
+  MultiVideoAnalysisResult? getTodayAnalysisSummary(List<String> videoPaths, List<String?> subtitlePaths) {
+    final videoKeys = <String>[];
+    
+    for (int i = 0; i < videoPaths.length; i++) {
+      final videoPath = videoPaths[i];
+      final subtitlePath = i < subtitlePaths.length ? subtitlePaths[i] : null;
+      final key = _getVideoKey(videoPath, subtitlePath);
+      videoKeys.add(key);
+    }
+    
+    return getMultiVideoAnalysis(videoKeys);
+  }
+
+  /// 计算多视频统计数据
+  MultiVideoAnalysisResult _calculateMultiVideoStats(List<SubtitleAnalysisResult> results) {
+    // 合并所有单词频率
+    final combinedWordFrequency = <String, int>{};
+    final combinedWordToSubtitle = <String, String>{};
+    final combinedSubtitleWords = <String>{};
+    final combinedLemmaToOriginalWords = <String, Set<String>>{};
+    
+    int totalWords = 0;
+    int totalFamiliarWords = 0;
+    int totalKnownWords = 0;
+    int totalVocabularyWords = 0;
+    int totalUnknownWords = 0;
+    int totalNeedsLearningWords = 0;
+    
+    for (final result in results) {
+      // 合并词频
+      result.wordFrequency.forEach((word, frequency) {
+        combinedWordFrequency[word] = (combinedWordFrequency[word] ?? 0) + frequency;
+        
+        // 如果这个单词第一次出现，记录其字幕信息
+        if (!combinedWordToSubtitle.containsKey(word)) {
+          combinedWordToSubtitle[word] = result.wordToSubtitle[word] ?? '';
+        }
+      });
+      
+      // 合并字幕单词集合
+      combinedSubtitleWords.addAll(result.subtitleWords);
+      
+      // 合并词根映射
+      result.lemmaToOriginalWords.forEach((lemma, originalWords) {
+        if (!combinedLemmaToOriginalWords.containsKey(lemma)) {
+          combinedLemmaToOriginalWords[lemma] = <String>{};
+        }
+        combinedLemmaToOriginalWords[lemma]!.addAll(originalWords);
+      });
+      
+      // 累加统计数据
+      totalWords += result.totalWords;
+      totalFamiliarWords += result.familiarWords;
+      totalKnownWords += result.knownWords;
+      totalVocabularyWords += result.vocabularyWords;
+      totalUnknownWords += result.unknownWords;
+      totalNeedsLearningWords += result.needsLearningWords;
+    }
+    
+    // 重新计算唯一单词数（因为可能有重复）
+    final uniqueWords = combinedWordFrequency.length;
+    
+    // 重新排序单词列表
+    final sortedWords = combinedWordFrequency.entries.toList();
+    sortedWords.sort((a, b) => b.value.compareTo(a.value));
+    
+    // 计算去重后的分类统计
+    int uniqueFamiliarWords = 0;
+    int uniqueKnownWords = 0;
+    int uniqueVocabularyWords = 0;
+    int uniqueUnknownWords = 0;
+    int uniqueNeedsLearningWords = 0;
+    
+    final vocabularyWordsSet = _vocabularyService.getAllWords().map((w) => w.word.toLowerCase()).toSet();
+    
+    combinedWordFrequency.forEach((word, _) {
+      if (_dictionaryService.isFamiliar(word)) {
+        uniqueFamiliarWords++;
+      } else {
+        uniqueNeedsLearningWords++;
+        
+        if (_dictionaryService.containsWord(word)) {
+          uniqueKnownWords++;
+        } else if (vocabularyWordsSet.contains(word.toLowerCase())) {
+          uniqueVocabularyWords++;
+        } else {
+          uniqueUnknownWords++;
+        }
+      }
+    });
+    
+    return MultiVideoAnalysisResult(
+      videoCount: results.length,
+      combinedWordFrequency: combinedWordFrequency,
+      combinedWordToSubtitle: combinedWordToSubtitle,
+      combinedSubtitleWords: combinedSubtitleWords,
+      combinedLemmaToOriginalWords: combinedLemmaToOriginalWords,
+      totalWords: totalWords,
+      uniqueWords: uniqueWords,
+      totalFamiliarWords: totalFamiliarWords,
+      totalKnownWords: totalKnownWords,
+      totalVocabularyWords: totalVocabularyWords,
+      totalUnknownWords: totalUnknownWords,
+      totalNeedsLearningWords: totalNeedsLearningWords,
+      uniqueFamiliarWords: uniqueFamiliarWords,
+      uniqueKnownWords: uniqueKnownWords,
+      uniqueVocabularyWords: uniqueVocabularyWords,
+      uniqueUnknownWords: uniqueUnknownWords,
+      uniqueNeedsLearningWords: uniqueNeedsLearningWords,
+      sortedWords: sortedWords,
+      analysisTime: DateTime.now(),
+      dictionaryService: _dictionaryService,
+    );
+  }
+
+  /// 获取学习进度对比（对比昨天和今天的数据）
+  LearningProgressComparison? getLearningProgress(
+    List<String> todayVideoKeys,
+    List<String> yesterdayVideoKeys,
+  ) {
+    final todayResult = getMultiVideoAnalysis(todayVideoKeys);
+    final yesterdayResult = getMultiVideoAnalysis(yesterdayVideoKeys);
+    
+    if (todayResult == null) return null;
+    
+    return LearningProgressComparison(
+      today: todayResult,
+      yesterday: yesterdayResult,
+    );
+  }
+
   @override
   void dispose() {
     clearAllCache();
     super.dispose();
+  }
+}
+
+/// 多视频分析结果
+class MultiVideoAnalysisResult {
+  final int videoCount;
+  final Map<String, int> combinedWordFrequency;
+  final Map<String, String> combinedWordToSubtitle;
+  final Set<String> combinedSubtitleWords;
+  final Map<String, Set<String>> combinedLemmaToOriginalWords;
+  final int totalWords;
+  final int uniqueWords;
+  final int totalFamiliarWords;
+  final int totalKnownWords;
+  final int totalVocabularyWords;
+  final int totalUnknownWords;
+  final int totalNeedsLearningWords;
+  final int uniqueFamiliarWords;
+  final int uniqueKnownWords;
+  final int uniqueVocabularyWords;
+  final int uniqueUnknownWords;
+  final int uniqueNeedsLearningWords;
+  final List<MapEntry<String, int>> sortedWords;
+  final DateTime analysisTime;
+  final DictionaryService _dictionaryService;
+
+  MultiVideoAnalysisResult({
+    required this.videoCount,
+    required this.combinedWordFrequency,
+    required this.combinedWordToSubtitle,
+    required this.combinedSubtitleWords,
+    required this.combinedLemmaToOriginalWords,
+    required this.totalWords,
+    required this.uniqueWords,
+    required this.totalFamiliarWords,
+    required this.totalKnownWords,
+    required this.totalVocabularyWords,
+    required this.totalUnknownWords,
+    required this.totalNeedsLearningWords,
+    required this.uniqueFamiliarWords,
+    required this.uniqueKnownWords,
+    required this.uniqueVocabularyWords,
+    required this.uniqueUnknownWords,
+    required this.uniqueNeedsLearningWords,
+    required this.sortedWords,
+    required this.analysisTime,
+    required DictionaryService dictionaryService,
+  }) : _dictionaryService = dictionaryService;
+
+  /// 获取需要学习的单词列表（按频率排序）
+  List<MapEntry<String, int>> get needsLearningWords {
+    return sortedWords.where((entry) {
+      return !_dictionaryService.isFamiliar(entry.key);
+    }).toList();
+  }
+
+  /// 获取高频但未掌握的单词（前50个需要学习的单词）
+  List<MapEntry<String, int>> get topNeedsLearningWords {
+    return needsLearningWords.take(50).toList();
+  }
+
+  /// 词汇掌握率
+  double get vocabularyMasteryRate {
+    return uniqueWords > 0 ? uniqueFamiliarWords / uniqueWords : 0.0;
+  }
+
+  /// 学习潜力（未掌握单词的总频次）
+  int get learningPotential {
+    return needsLearningWords.fold<int>(0, (sum, entry) => sum + entry.value);
+  }
+}
+
+/// 学习进度对比
+class LearningProgressComparison {
+  final MultiVideoAnalysisResult today;
+  final MultiVideoAnalysisResult? yesterday;
+
+  LearningProgressComparison({
+    required this.today,
+    this.yesterday,
+  });
+
+  /// 今日新接触的单词数量
+  int get newWordsToday {
+    if (yesterday == null) return today.uniqueWords;
+    
+    final yesterdayWords = yesterday!.combinedSubtitleWords;
+    final todayWords = today.combinedSubtitleWords;
+    
+    return todayWords.difference(yesterdayWords).length;
+  }
+
+  /// 词汇掌握率提升
+  double get masteryRateImprovement {
+    if (yesterday == null) return 0.0;
+    
+    return today.vocabularyMasteryRate - yesterday!.vocabularyMasteryRate;
+  }
+
+  /// 学习效率（新单词与学习时长的比率）
+  double getLearningEfficiency(int studyDurationMinutes) {
+    if (studyDurationMinutes <= 0) return 0.0;
+    return newWordsToday / studyDurationMinutes;
   }
 } 

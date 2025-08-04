@@ -18,6 +18,7 @@ import 'services/dictionary_service.dart';
 import 'services/translation_service.dart';
 import 'services/bailian_translation_service.dart';
 import 'services/subtitle_analysis_service.dart';
+import 'services/daily_video_service.dart';
 import 'models/history_model.dart';
 import 'screens/home_screen.dart';
 import 'screens/windows_requirements_screen.dart';
@@ -139,6 +140,17 @@ class MyApp extends StatelessWidget {
               previous ?? SubtitleAnalysisService(
                 vocabularyService: vocabularyService,
                 dictionaryService: dictionaryService,
+              ),
+        ),
+        ChangeNotifierProxyProvider2<VideoService, SubtitleAnalysisService, DailyVideoService>(
+          create: (context) => DailyVideoService(
+            videoService: Provider.of<VideoService>(context, listen: false),
+            subtitleAnalysisService: Provider.of<SubtitleAnalysisService>(context, listen: false),
+          ),
+          update: (context, videoService, subtitleAnalysisService, previous) =>
+              previous ?? DailyVideoService(
+                videoService: videoService,
+                subtitleAnalysisService: subtitleAnalysisService,
               ),
         ),
       ],

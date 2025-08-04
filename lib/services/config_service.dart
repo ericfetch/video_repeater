@@ -38,6 +38,7 @@ class ConfigService extends ChangeNotifier {
     
     // 界面设置
     'darkMode': false,
+    'showDailyVideoList': true, // 是否显示今日视频列表
   };
   
   // 当前配置
@@ -101,6 +102,9 @@ class ConfigService extends ChangeNotifier {
   
   // 获取暗黑模式
   bool get darkMode => _config['darkMode'];
+  
+  // 获取是否显示今日视频列表
+  bool get showDailyVideoList => _config['showDailyVideoList'] ?? true;
   
   // 构造函数
   ConfigService() {
@@ -260,6 +264,13 @@ class ConfigService extends ChangeNotifier {
   // 更新暗黑模式
   Future<void> updateDarkMode(bool isDark) async {
     _config['darkMode'] = isDark;
+    await saveConfig();
+    notifyListeners();
+  }
+
+  // 更新是否显示今日视频列表
+  Future<void> updateShowDailyVideoList(bool show) async {
+    _config['showDailyVideoList'] = show;
     await saveConfig();
     notifyListeners();
   }
